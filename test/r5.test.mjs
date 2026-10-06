@@ -383,3 +383,55 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
     globalThis.fetch = originalFetch;
   }
 });
+
+test('step 4 attack check probes the Data API with the public anon key only', async () => {
+  const originalFetch = globalThis.fetch;
+  const key = 'sb_publishable_abcdefghij1234567890';
+  const step4 = { ...config, step: 4, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
+  const seen = [];
+  const handler = (dataApiStatus, pageHtml) => async (url, init = {}) => {
+    const target = new URL(String(url));
+    const method = init.method ?? 'GET';
+    seen.push({ host: target.host, method, path: target.pathname, search: target.search, apikey: init.headers?.apikey, body: init.body });
+    if (target.host === 'projref.supabase.co') return Response.json({ code: '42501' }, { status: dataApiStatus });
+    if (target.pathname === '/' ) return new Response(pageHtml, { status: 200 });
+    if (target.pathname === '/data.json') return Response.json({ notes: [] });
+    if (method === 'PATCH') return new Response('no', { status: 405 });
+    return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+  };
+  try {
+    globalThis.fetch = handler(401, `<script>createClient('x', '${key}')</script>`);
+    const results = await runAttackChecks(step4);
+    const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+    for (const id of ['anon_direct_read_rejected', 'anon_direct_create_rejected',
+      'anon_direct_update_rejected', 'anon_direct_delete_rejected']) {
+      assert.equal(byId[id], '거부됨 (HTTP 401)', id);
+    }
+    const direct = seen.filter(entry => entry.host === 'projref.supabase.co');
+    assert.deepEqual(direct.map(entry => entry.method), ['GET', 'POST', 'PATCH', 'DELETE']);
+    assert.ok(direct.every(entry => entry.path === '/rest/v1/vault_notes' && entry.apikey === key));
+    assert.equal(direct[1].body, '{}', '추가 점검은 필수 칸이 빠진 빈 본문만 보냄');
+    for (const entry of direct.slice(2)) assert.match(entry.search, /^\?id=eq\.00000000-0000-4000-8000-000000000000$/u);
+    assert.match(byId.logged_in_own_crud, /^미실행/u);
+    assert.match(byId.cross_user_access, /^미실행/u);
+    assert.equal(byId.logged_in_crud, undefined);
+    assert.ok(results.length <= 20);
+    assert.equal(new Set(results.map(item => item.attackId)).size, results.length);
+    assert.doesNotMatch(JSON.stringify(results), new RegExp(key, 'u'), '결과에 공개 키도 싣지 않음');
+    for (const item of results) assert.deepEqual(Object.keys(item).sort(), ['attackId', 'expected', 'observed']);
+
+    seen.length = 0;
+    globalThis.fetch = handler(200, `<script>'${key}'</script>`);
+    const open = Object.fromEntries((await runAttackChecks(step4)).map(item => [item.attackId, item.observed]));
+    assert.match(open.anon_direct_read_rejected, /401\/403이 아닌 응답이 옴 \(HTTP 200\)/u);
+    assert.match(open.anon_direct_delete_rejected, /401\/403이 아닌 응답이 옴/u);
+
+    seen.length = 0;
+    globalThis.fetch = handler(401, '<html>키 없음</html>');
+    const nokey = Object.fromEntries((await runAttackChecks(step4)).map(item => [item.attackId, item.observed]));
+    assert.match(nokey.anon_direct_read_rejected, /^미실행/u);
+    assert.equal(seen.some(entry => entry.host === 'projref.supabase.co'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

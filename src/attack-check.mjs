@@ -30,14 +30,15 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3].includes(config.step)) {
+  if (![1, 2, 3, 4].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   if (config.step === 1) return firstStepChecks(config, app);
   if (config.step === 2) return secondStepChecks(config, app);
-  return thirdStepChecks(app);
+  if (config.step === 3) return thirdStepChecks(app);
+  return fourthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -113,13 +114,13 @@ async function secondStepChecks(config, app) {
 const SAMPLE_ID = '00000000-0000-4000-8000-000000000000';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-async function expectRejected(app, { attackId, expected, path, init = {}, status = 401, scanForKey = false }) {
+async function expectRejected(app, { attackId, expected, path, init = {}, status = 401, statuses = [status], scanForKey = false }) {
   try {
     const response = await send(new URL(path, app), init);
     const text = await response.text();
     const keyShown = scanForKey && KEY_SHAPE.test(text);
-    const observed = response.status === status ? `거부됨 (HTTP ${response.status})`
-      : `${status}이 아닌 응답이 옴 (HTTP ${response.status})`;
+    const observed = statuses.includes(response.status) ? `거부됨 (HTTP ${response.status})`
+      : `${statuses.join('/')}이 아닌 응답이 옴 (HTTP ${response.status})`;
     return { attackId, expected, observed: keyShown ? `${observed}. 응답에 비밀키 형태의 문자열이 있음` : observed };
   } catch {
     return { attackId, expected, observed: '요청이 실패해 확인하지 못함' };
@@ -154,4 +155,53 @@ async function thirdStepChecks(app) {
   results.push({ attackId: 'cross_user_access', expected: 'B가 A의 메모를 읽거나 고치거나 지울 수 없어야 함 (4단계 목표)',
     observed: '미실행. 3단계에는 소유자 검사가 없어 막히지 않는 것이 알려진 허점이며 4단계에서 기록하고 고침' });
   return results;
+}
+
+// 4단계: 3단계의 토큰 없는 점검에, 공개용 anon 키로 Supabase Data API에 직접 보내는 점검을 더합니다.
+// 공개 키는 화면 코드에 원래 들어 있는 값이라, 외부 사람이 하듯 배포된 페이지에서 읽어 씁니다.
+// 요청은 존재하지 않는 id 조건이나 필수 칸이 빠진 본문만 써서, 권한이 잘못 열려 있어도 자료가 바뀌지 않게 합니다.
+// authenticated 역할의 직접 접근과 A/B 로그인이 필요한 점검은 이 코드가 실행하지 않고 '미실행'으로 남깁니다.
+async function readPublishableKey(app) {
+  try {
+    const page = await (await send(app)).text();
+    return /sb_publishable_[A-Za-z0-9_-]{10,}/u.exec(page)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function fourthStepChecks(config, app) {
+  const kept = (await thirdStepChecks(app))
+    .filter(item => !['logged_in_crud', 'cross_user_access'].includes(item.attackId));
+
+  const anonChecks = [
+    { attackId: 'anon_direct_read_rejected', expected: 'anon 공개 키로 Data API에 직접 목록을 읽으면 거부되어야 함',
+      query: '?select=*', init: {} },
+    { attackId: 'anon_direct_create_rejected', expected: 'anon 공개 키로 Data API에 직접 추가하면 거부되어야 함',
+      query: '', init: { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: '{}' } },
+    { attackId: 'anon_direct_update_rejected', expected: 'anon 공개 키로 Data API에 직접 수정하면 거부되어야 함',
+      query: `?id=eq.${SAMPLE_ID}`, init: { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ title: '점검' }) } },
+    { attackId: 'anon_direct_delete_rejected', expected: 'anon 공개 키로 Data API에 직접 삭제하면 거부되어야 함',
+      query: `?id=eq.${SAMPLE_ID}`, init: { method: 'DELETE' } },
+  ];
+  let dataApi = null;
+  try { dataApi = new URL('/rest/v1/vault_notes', new URL(config.identityProvider.issuer).origin); } catch { /* 미실행으로 남김 */ }
+  const key = dataApi ? await readPublishableKey(app) : null;
+  for (const check of anonChecks) {
+    if (!dataApi || !key) {
+      kept.push({ attackId: check.attackId, expected: check.expected,
+        observed: '미실행. 공개 anon 키나 Data API 주소를 배포된 페이지와 설정에서 찾지 못함' });
+      continue;
+    }
+    kept.push(await expectRejected(app, {
+      attackId: check.attackId, expected: check.expected, path: `${dataApi.href}${check.query}`, statuses: [401, 403],
+      init: { ...check.init, headers: { ...check.init.headers, apikey: key } },
+    }));
+  }
+
+  kept.push({ attackId: 'logged_in_own_crud', expected: '정상 A·B 로그인 뒤에는 각자 자기 메모를 읽고 추가·수정·삭제할 수 있어야 함',
+    observed: '미실행. 계정 정보를 코드에 넣지 않으므로 브라우저에서 학생이 직접 확인함' });
+  kept.push({ attackId: 'cross_user_access', expected: 'B가 A의 메모를 읽거나 고치거나 지울 수 없고 소유자도 바꿀 수 없어야 함',
+    observed: '미실행. A·B 로그인이 필요해 이 코드는 실행하지 않음. 서버의 소유자 비교는 로컬 시험(가짜 검사기·메모리 저장소)으로만 확인함' });
+  return kept;
 }

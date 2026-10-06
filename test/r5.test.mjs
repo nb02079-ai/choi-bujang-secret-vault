@@ -217,7 +217,7 @@ test('notes api lets a logged-in user add, read, edit and delete notes', async (
   const one = await call(api.item, 'GET', { token: A, url: itemUrl });
   assert.deepEqual(one.body, { id, title: '첫 메모', body: '내용' });
 
-  const edited = await call(api.item, 'PUT', { token: A, url: itemUrl, body: { title: '고친 제목', body: '고친 내용', owner_id: USER_B } });
+  const edited = await call(api.item, 'PUT', { token: A, url: itemUrl, body: { title: '고친 제목', body: '고친 내용', owner_id: USER_A } });
   assert.equal(edited.statusCode, 200);
   assert.deepEqual(edited.body, { id });
   assert.equal(store.rows.find(row => row.id === id).owner_id, USER_A, '수정해도 owner_id는 바뀌지 않음');
@@ -233,6 +233,79 @@ test('notes api lets a logged-in user add, read, edit and delete notes', async (
   assert.equal(store.calls.length, before, '형식이 틀린 id는 저장소를 부르지 않음');
 
   assert.doesNotMatch(JSON.stringify([list.body, created.body, one.body]), new RegExp(SECRET, 'u'));
+});
+
+test('notes api limits read, add, edit and delete to the verified owner', async () => {
+  const { api, store, call, A, B } = await notesFixture();
+  const snapshot = () => JSON.stringify(store.rows);
+
+  // A와 B가 각자 메모를 만듭니다. 본문의 owner_id는 무시되고 확인된 사용자 ID로 저장됩니다.
+  const a1 = (await call(api.collection, 'POST', { token: A, body: { title: 'A의 메모', body: 'a', owner_id: USER_B } })).body.id;
+  const b1 = (await call(api.collection, 'POST', { token: B, body: { title: 'B의 메모', body: 'b', owner_id: USER_A } })).body.id;
+  assert.equal(store.rows.find(row => row.id === a1).owner_id, USER_A);
+  assert.equal(store.rows.find(row => row.id === b1).owner_id, USER_B);
+  // 주인이 없는 기존 메모(처음 네 건 중 하나)는 누구도 접근할 수 없습니다.
+  store.rows.push({ id: '33333333-3333-4333-8333-333333333333', owner_id: null, title: '주인 없음', content: 'x' });
+  const orphan = '33333333-3333-4333-8333-333333333333';
+
+  // 각자 자기 메모는 읽고 고치고 지울 수 있습니다.
+  assert.deepEqual((await call(api.item, 'GET', { token: A, url: `/api/notes/${a1}` })).body, { id: a1, title: 'A의 메모', body: 'a' });
+  assert.deepEqual((await call(api.item, 'GET', { token: B, url: `/api/notes/${b1}` })).body, { id: b1, title: 'B의 메모', body: 'b' });
+  assert.equal((await call(api.item, 'PUT', { token: B, url: `/api/notes/${b1}`, body: { title: 'B 수정', body: 'b2', owner_id: USER_B } })).statusCode, 200);
+
+  // 목록에는 본인 메모만 나옵니다. 쿼리의 owner_id도 쓰지 않습니다.
+  assert.deepEqual((await call(api.collection, 'GET', { token: A, url: `/api/notes?owner_id=${USER_B}` })).body.map(note => note.id), [a1]);
+  assert.deepEqual((await call(api.collection, 'GET', { token: B })).body.map(note => note.id), [b1]);
+
+  // 상대 메모와 주인 없는 메모는 읽기·수정·삭제 모두 404이고 저장소의 값은 바뀌지 않습니다.
+  const before = snapshot();
+  for (const [token, target] of [[B, a1], [A, b1], [A, orphan], [B, orphan]]) {
+    const url = `/api/notes/${target}`;
+    assert.equal((await call(api.item, 'GET', { token, url })).statusCode, 404, `GET ${target}`);
+    assert.equal((await call(api.item, 'PUT', { token, url, body: { title: '탈취', body: 'x' } })).statusCode, 404, `PUT ${target}`);
+    assert.equal((await call(api.item, 'DELETE', { token, url })).statusCode, 404, `DELETE ${target}`);
+    // 본인 ID를 owner_id로 내세워 남의 메모를 가져오려는 시도도 거부됩니다.
+    const self = token === A ? USER_A : USER_B;
+    assert.equal((await call(api.item, 'PUT', { token, url, body: { title: '탈취', body: 'x', owner_id: self } })).statusCode, 404);
+  }
+  assert.equal(snapshot(), before);
+
+  // 내 메모의 소유자를 바꾸려는 수정은 쓰기 전에 거부됩니다.
+  for (const owner of [USER_B, null, 7, '', 'not-a-uuid']) {
+    const res = await call(api.item, 'PUT', { token: A, url: `/api/notes/${a1}`, body: { title: '이전', body: 'x', owner_id: owner } });
+    assert.equal(res.statusCode, 403, JSON.stringify(owner));
+  }
+  assert.equal(snapshot(), before);
+  assert.equal(store.rows.find(row => row.id === a1).owner_id, USER_A);
+
+  // 저장소에 보내는 수정·삭제에는 항상 본인 owner_id 조건이 붙고, 수정 값의 owner_id도 본인입니다.
+  const writes = store.calls.filter(entry => ['PATCH', 'DELETE'].includes(entry.method));
+  assert.ok(writes.length > 0);
+  for (const write of writes) {
+    assert.match(write.query.owner_id, /^eq\.(a{8}-a{4}-4a{3}-8a{3}-a{12}|b{8}-b{4}-4b{3}-8b{3}-b{12})$/u);
+    if (write.body) assert.equal(write.body.owner_id, write.query.owner_id.slice(3));
+  }
+
+  // 본인 메모 삭제는 되고, 지운 뒤에는 404이며, 남의 메모는 그대로 남습니다.
+  assert.equal((await call(api.item, 'DELETE', { token: A, url: `/api/notes/${a1}` })).statusCode, 200);
+  assert.equal((await call(api.item, 'GET', { token: A, url: `/api/notes/${a1}` })).statusCode, 404);
+  assert.equal(store.rows.some(row => row.id === b1), true);
+  assert.equal((await call(api.item, 'DELETE', { token: B, url: `/api/notes/${b1}` })).statusCode, 200);
+});
+
+test('allowedRoutes lists exactly the routes the handlers accept', async () => {
+  const { readFileSync } = await import('node:fs');
+  const real = JSON.parse(readFileSync(new URL('../aleph.config.json', import.meta.url), 'utf8'));
+  const { api, call, A } = await notesFixture();
+  const id = '44444444-4444-4444-8444-444444444444';
+  const accepted = [];
+  for (const [handler, path, shape] of [[api.collection, '/api/notes', '/api/notes'], [api.item, `/api/notes/${id}`, '/api/notes/:id']]) {
+    for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']) {
+      const res = await call(handler, method, { token: A, url: path, body: { title: 't', body: 'b' } });
+      if (res.statusCode !== 405) accepted.push(`${method} ${shape}`);
+    }
+  }
+  assert.deepEqual([...accepted].sort(), [...real.allowedRoutes].sort());
 });
 
 test('notes api reports server setup problems without leaking the key', async () => {

@@ -6,8 +6,8 @@ const root = resolve(import.meta.dirname, '..');
 const source = resolve(root, 'data.json');
 const output = resolve(root, 'public', 'data.json');
 const config = JSON.parse(await readFile(resolve(root, 'aleph.config.json'), 'utf8'));
-if (config.step !== 1 && config.step !== 2) {
-  throw new Error('3단계부터는 공개 data.json 복사를 끝내고 보호된 자료 API로 바꾸세요.');
+if (!Number.isInteger(config.step) || config.step < 1 || config.step > 12) {
+  throw new Error('aleph.config.json의 step을 확인해 주세요.');
 }
 const data = JSON.parse(await readFile(source, 'utf8'));
 if (!Array.isArray(data.notes)) {

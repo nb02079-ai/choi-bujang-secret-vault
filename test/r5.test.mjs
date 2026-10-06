@@ -56,9 +56,10 @@ test('first attack check reads public data.json without credentials', async () =
   }
 });
 
-test('step 2 identity keeps the configured step', () => {
+test('deployment identity keeps the configured step', () => {
   assert.equal(deploymentIdentity(env, { ...config, step: 2 }).step, 2);
-  assert.throws(() => deploymentIdentity(env, { ...config, step: 3 }));
+  assert.equal(deploymentIdentity(env, { ...config, step: 3 }).step, 3);
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 13 }));
 });
 
 test('step 2 attack check records only requests it sent', async () => {
@@ -264,4 +265,48 @@ test('aleph.config.json identityProvider is accepted by the starter login verifi
   assert.equal(real.identityProvider.audience, 'authenticated');
   assert.equal(real.identityProvider.jwksUrl, `${real.identityProvider.issuer}/.well-known/jwks.json`);
   assert.doesNotMatch(JSON.stringify(real.identityProvider), /secret|service_role|eyJ/iu);
+});
+
+test('step 3 attack check sends tokenless requests and leaves account checks unrun', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const { pathname } = new URL(String(url));
+      const method = init.method ?? 'GET';
+      calls.push(`${method} ${pathname}`);
+      assert.equal(init.headers?.Authorization === undefined || init.headers.Authorization === 'Bearer aaa.bbb.ccc', true);
+      if (pathname === '/data.json') return Response.json({ notes: [] });
+      if (method === 'PATCH') return new Response('no', { status: 405 });
+      return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    };
+    const results = await runAttackChecks({ ...config, step: 3 });
+    assert.deepEqual(calls, ['GET /data.json', 'GET /api/notes', 'POST /api/notes',
+      'GET /api/notes/00000000-0000-4000-8000-000000000000', 'PUT /api/notes/00000000-0000-4000-8000-000000000000',
+      'DELETE /api/notes/00000000-0000-4000-8000-000000000000', 'GET /api/notes', 'POST /api/notes', 'PATCH /api/notes']);
+    const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+    assert.match(byId.static_data_json_empty, /비어 있고/u);
+    for (const id of ['anonymous_list_rejected', 'anonymous_create_rejected', 'anonymous_get_one_rejected',
+      'anonymous_update_rejected', 'anonymous_delete_rejected', 'forged_token_rejected', 'forged_identity_rejected']) {
+      assert.equal(byId[id], '거부됨 (HTTP 401)', id);
+    }
+    assert.equal(byId.unsupported_method_rejected, '거부됨 (HTTP 405)');
+    assert.match(byId.logged_in_crud, /^미실행/u);
+    assert.match(byId.cross_user_access, /^미실행/u);
+    assert.equal(new Set(results.map(item => item.attackId)).size, results.length);
+    for (const item of results) assert.deepEqual(Object.keys(item).sort(), ['attackId', 'expected', 'observed']);
+
+    globalThis.fetch = async (url) => (new URL(String(url)).pathname === '/data.json'
+      ? Response.json({ notes: [] })
+      : Response.json({ notes: [{ title: 't' }], leak: 'sb_secret_abcdef123456' }, { status: 200 }));
+    const open = Object.fromEntries((await runAttackChecks({ ...config, step: 3 })).map(item => [item.attackId, item.observed]));
+    assert.match(open.anonymous_list_rejected, /401이 아닌 응답이 옴 \(HTTP 200\)\. 응답에 비밀키 형태/u);
+    assert.match(open.anonymous_delete_rejected, /401이 아닌 응답이 옴/u);
+
+    globalThis.fetch = async () => { throw new Error('network'); };
+    const down = await runAttackChecks({ ...config, step: 3 });
+    assert.equal(down.filter(item => /확인하지 못함/u.test(item.observed)).length, 9);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

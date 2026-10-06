@@ -35,7 +35,7 @@
 
 메모를 옮긴 뒤에는 현재 배포 파일과 GitHub 최신 파일에서 가상 메모 문장이 사라졌는지 직접 검색합니다. 검색어는 메모에 공통으로 들어 있는 문장 `실습용 가상`입니다. 배포 주소는 Vercel 프로젝트의 도메인입니다.
 
-1. 현재 배포 파일: `https://choi-bujang-secret-vault-hazel.vercel.app`의 `/`, `/index.html`, `/data.json`, `/aleph.json`을 각각 열어 검색어가 없는지 봅니다. 터미널에서는 `curl -s <주소> | grep -c '실습용 가상'`이 `0`이어야 합니다.
+1. 현재 배포 파일: `https://choi-bujang-secret-vault-hazel.vercel.app`의 `/`, `/index.html`, `/data.json`, `/aleph.json`을 각각 열어 검색어가 없는지 봅니다. 터미널에서는 `curl -s <주소> | grep -c '실습용 가상'`이 `0`이어야 합니다. `/data.json`에는 1단계 시작 틀 확인 표시 `SAMPLE_NOTE_1`(`sampleMarker`)도 없어야 하므로 `curl -s <주소>/data.json | grep -c SAMPLE_NOTE_1`도 `0`이어야 합니다. 2단계부터 `data.json`에 이 표시가 있으면 빌드가 실패합니다.
 2. GitHub 최신 파일: 푸시 뒤 `git fetch origin`을 하고 `git grep -n '실습용 가상' origin/r5-rc1`을 실행합니다. 결과가 없어야 합니다. 로컬 `supabase/`는 Git에 올리지 않으므로 이 검색에 나오지 않습니다.
 3. 서버 함수는 이 절차의 대상이 아닙니다. `/api/notes`는 메모를 돌려주는 것이 맞는 동작입니다. 그 대신 아래 약점으로 따로 기록합니다.
 

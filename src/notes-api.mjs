@@ -3,8 +3,9 @@
 // 요청의 로그인 토큰은 틀이 준 src/verify-login.mjs로만 검사하고, 사용자 ID는 그 검사 결과만 씁니다.
 // 요청 본문·쿼리·헤더의 userId, owner_id, role은 읽지도 믿지도 않습니다.
 //
-// 아직 소유자 검사는 하지 않습니다. 로그인한 사람은 id만 알면 남의 메모도 읽고 고치고 지울 수 있습니다.
-// 이 허점은 4단계에서 막습니다.
+// 모든 읽기·추가·수정·삭제는 본인 메모로 제한합니다. 검증된 사용자 ID와 DB 행의 owner_id를 비교하고,
+// 맞지 않으면 기본 거부합니다. 추가할 때 owner_id는 검증된 사용자 ID로만 저장합니다.
+// DB 쪽 GRANT·RLS는 이 파일이 아니라 별도 SQL로 둡니다.
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 
@@ -19,6 +20,8 @@ const defaultVerify = (authorization) => {
   return verifier(authorization);
 };
 
+const sameUser = (a, b) => typeof a === 'string' && typeof b === 'string'
+  && a.length > 0 && a.toLowerCase() === b.toLowerCase();
 const toNote = ({ id, title, content }) => ({ id, title, body: content });
 
 function readJsonBody(req) {
@@ -129,19 +132,24 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
     }
   };
 
-  // /api/notes/:id : GET 한 건, PUT 수정, DELETE 삭제
+  // 검증된 사용자 ID와 DB 행의 owner_id를 코드에서 직접 비교합니다.
+  // 남의 메모, 주인이 없는 메모, 없는 메모는 모두 같은 404로 답해 존재 여부를 알려 주지 않습니다.
+  const loadOwned = async (id, userId) => {
+    const result = await store('GET', { query: { select: 'id,title,content,owner_id', id: `eq.${id}`, limit: '1' } });
+    if (!result.ok) return { failed: result.status };
+    const row = result.rows?.[0];
+    return row && sameUser(row.owner_id, userId) ? { row } : { missing: true };
+  };
+
+  // /api/notes/:id : GET 한 건, PUT 수정, DELETE 삭제 (모두 본인 메모만)
   const item = async (req, res) => {
     const checked = await guard(req, res, ['GET', 'PUT', 'DELETE']);
     if (!checked) return undefined;
+    const { identity } = checked;
     const id = pathId(req);
-    if (!id) return res.status(404).json({ error: '메모를 찾을 수 없습니다.' });
     const notFound = () => res.status(404).json({ error: '메모를 찾을 수 없습니다.' });
+    if (!id) return notFound();
     try {
-      if (req.method === 'GET') {
-        const result = await store('GET', { query: { select: 'id,title,content', id: `eq.${id}`, limit: '1' } });
-        if (!result.ok) return storeFailed(res, result.status);
-        return result.rows?.[0] ? res.status(200).json(toNote(result.rows[0])) : notFound();
-      }
       if (req.method === 'PUT') {
         const body = readJsonBody(req);
         const fields = body && cleanFields(body);
@@ -149,11 +157,30 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
         if (body.id !== undefined && String(body.id).toLowerCase() !== id) {
           return res.status(400).json({ error: '본문의 id가 경로의 id와 다릅니다.' });
         }
-        const result = await store('PATCH', { query: { select: 'id', id: `eq.${id}` }, body: fields, prefer: 'return=representation' });
+        // 새 행의 소유자도 본인이어야 합니다. 본문이 다른 owner_id를 내세우면 쓰기 전에 거부합니다.
+        if ('owner_id' in body && !(typeof body.owner_id === 'string' && sameUser(body.owner_id, identity.userId))) {
+          return res.status(403).json({ error: '메모의 소유자는 바꿀 수 없습니다.' });
+        }
+        const owned = await loadOwned(id, identity.userId);
+        if (owned.failed) return storeFailed(res, owned.failed);
+        if (owned.missing) return notFound();
+        // 조건에 owner_id를 다시 걸어, 확인과 쓰기 사이에 소유자가 바뀐 경우에도 본인 행만 고칩니다.
+        const result = await store('PATCH', {
+          query: { select: 'id', id: `eq.${id}`, owner_id: `eq.${identity.userId}` },
+          body: { ...fields, owner_id: identity.userId }, prefer: 'return=representation',
+        });
         if (!result.ok) return storeFailed(res, result.status);
         return result.rows?.[0] ? res.status(200).json({ id }) : notFound();
       }
-      const result = await store('DELETE', { query: { select: 'id', id: `eq.${id}` }, prefer: 'return=representation' });
+
+      const owned = await loadOwned(id, identity.userId);
+      if (owned.failed) return storeFailed(res, owned.failed);
+      if (owned.missing) return notFound();
+      if (req.method === 'GET') return res.status(200).json(toNote(owned.row));
+
+      const result = await store('DELETE', {
+        query: { select: 'id', id: `eq.${id}`, owner_id: `eq.${identity.userId}` }, prefer: 'return=representation',
+      });
       if (!result.ok) return storeFailed(res, result.status);
       return result.rows?.[0] ? res.status(200).json({ id }) : notFound();
     } catch {

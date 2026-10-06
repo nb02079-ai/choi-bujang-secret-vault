@@ -55,3 +55,39 @@ test('first attack check reads public data.json without credentials', async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test('step 2 identity keeps the configured step', () => {
+  assert.equal(deploymentIdentity(env, { ...config, step: 2 }).step, 2);
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 3 }));
+});
+
+test('step 2 attack check records only requests it sent', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const path = new URL(String(url)).pathname;
+      calls.push(`${init.method ?? 'GET'} ${path}`);
+      if (path === '/data.json') return Response.json({ sampleMarker: 'SAMPLE_NOTE_1', notes: [] });
+      if (init.method === 'POST') return new Response('no', { status: 405 });
+      return Response.json({ notes: [{ title: 'a', content: 'b' }] });
+    };
+    const results = await runAttackChecks({ ...config, step: 2 });
+    assert.deepEqual(calls, ['GET /data.json', 'GET /api/notes', 'POST /api/notes']);
+    const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+    assert.match(byId.static_data_json_empty, /비어 있음/u);
+    assert.match(byId.anonymous_api_read, /1건이 읽힘/u);
+    assert.match(byId.api_response_no_key, /없음/u);
+    assert.match(byId.api_post_rejected, /405/u);
+    for (const item of results) {
+      assert.deepEqual(Object.keys(item).sort(), ['attackId', 'expected', 'observed']);
+      assert.doesNotMatch(JSON.stringify(item), /"title"|"content"/u);
+    }
+    globalThis.fetch = async () => { throw new Error('network'); };
+    const failed = await runAttackChecks({ ...config, step: 2 });
+    assert.equal(failed.length, 4);
+    assert.ok(failed.every(item => /확인하지 못함/u.test(item.observed)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -106,47 +106,152 @@ function fakeResponse() {
   return res;
 }
 
-test('api/notes refuses without a verified login and never reads the data store', async () => {
-  const { createHandler } = await import('../api/notes.mjs');
-  const secret = 'sb_secret_testvalue_never_returned';
-  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: secret };
-  let storeCalls = 0;
-  const seen = [];
-  const handler = createHandler({
-    env,
-    verify: async (authorization) => { seen.push(authorization); return authorization === 'Bearer good.token.value' ? { kind: 'student', userId: 'u' } : null; },
-    fetchImpl: async (url, init) => {
-      storeCalls += 1;
-      assert.equal(init.headers.apikey, secret);
-      return Response.json([{ title: 'T', content: 'C', owner_id: 'hidden' }]);
-    },
-  });
+const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const USER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const SECRET = 'sb_secret_testvalue_never_returned';
 
-  for (const headers of [{}, { authorization: 'Bearer bad.token.value' },
-    { authorization: 'Bearer bad.token.value', 'x-user-id': 'admin', 'x-role': 'admin' }]) {
+// 자료 저장소(PostgREST)를 흉내 내는 메모리 저장소입니다. 실제 Supabase를 부르지 않습니다.
+function memoryStore() {
+  const rows = [];
+  const calls = [];
+  const pick = (row, select) => Object.fromEntries(select.split(',').map(key => [key, row[key]]));
+  const fetchImpl = async (url, init) => {
+    assert.equal(init.headers.apikey, SECRET);
+    const query = Object.fromEntries(url.searchParams);
+    const eq = (field) => (query[field]?.startsWith('eq.') ? query[field].slice(3) : undefined);
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ method: init.method, query, body });
+    const matching = () => rows.filter(row => (eq('id') === undefined || row.id === eq('id'))
+      && (eq('owner_id') === undefined || row.owner_id === eq('owner_id')));
+    if (init.method === 'GET') return Response.json(matching().map(row => pick(row, query.select)));
+    if (init.method === 'POST') {
+      const row = { id: body.id ?? crypto.randomUUID(), ...body };
+      if (rows.some(existing => existing.id === row.id)) return new Response('{}', { status: 409 });
+      rows.push(row);
+      return Response.json([pick(row, query.select)], { status: 201 });
+    }
+    if (init.method === 'PATCH') {
+      const hit = matching();
+      hit.forEach(row => Object.assign(row, body));
+      return Response.json(hit.map(row => pick(row, query.select)));
+    }
+    const hit = matching();
+    hit.forEach(row => rows.splice(rows.indexOf(row), 1));
+    return Response.json(hit.map(row => pick(row, query.select)));
+  };
+  return { rows, calls, fetchImpl };
+}
+
+async function notesFixture() {
+  const { createNotesApi } = await import('../src/notes-api.mjs');
+  const store = memoryStore();
+  const tokens = {
+    'Bearer tokenA.aaa.aaa': { kind: 'student', userId: USER_A },
+    'Bearer tokenB.bbb.bbb': { kind: 'student', userId: USER_B },
+  };
+  const verify = async (authorization) => tokens[authorization] ?? null;
+  const api = createNotesApi({ verify, fetchImpl: store.fetchImpl,
+    env: { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: SECRET } });
+  const call = async (handler, method, { token, url = '/api/notes', body, headers = {} } = {}) => {
     const res = fakeResponse();
-    await handler({ method: 'GET', headers, query: { userId: 'admin', role: 'admin' } }, res);
-    assert.equal(res.statusCode, 401);
-    assert.deepEqual(res.body, { error: '로그인이 필요합니다.' });
+    const authorization = token ? { authorization: `Bearer ${token}` } : {};
+    await handler({ method, url, headers: { ...authorization, ...headers }, body }, res);
+    return res;
+  };
+  return { api, store, call, A: 'tokenA.aaa.aaa', B: 'tokenB.bbb.bbb' };
+}
+
+test('notes api rejects every route without a verified login and never touches the store', async () => {
+  const { api, store, call, A } = await notesFixture();
+  const id = '11111111-1111-4111-8111-111111111111';
+  const spoof = { 'x-user-id': USER_A, 'x-role': 'admin' };
+  const routes = [[api.collection, 'GET', '/api/notes'], [api.collection, 'POST', '/api/notes'],
+    [api.item, 'GET', `/api/notes/${id}`], [api.item, 'PUT', `/api/notes/${id}`], [api.item, 'DELETE', `/api/notes/${id}`]];
+  for (const [handler, method, url] of routes) {
+    for (const extra of [{}, { token: 'bad.token.value' }]) {
+      const res = await call(handler, method, { url, headers: spoof, body: { title: 't', body: 'b', owner_id: USER_A }, ...extra });
+      assert.equal(res.statusCode, 401, `${method} ${url}`);
+      assert.deepEqual(res.body, { error: '로그인이 필요합니다.' });
+    }
   }
-  assert.equal(storeCalls, 0);
+  assert.equal(store.calls.length, 0);
+  assert.equal((await call(api.collection, 'DELETE', { token: A })).statusCode, 405);
+  assert.equal((await call(api.item, 'POST', { token: A, url: `/api/notes/${id}` })).statusCode, 405);
+});
 
-  const ok = fakeResponse();
-  await handler({ method: 'GET', headers: { authorization: 'Bearer good.token.value', 'x-user-id': 'admin' } }, ok);
-  assert.equal(ok.statusCode, 200);
-  assert.deepEqual(ok.body, { notes: [{ title: 'T', content: 'C' }] });
-  assert.doesNotMatch(JSON.stringify(ok.body), new RegExp(secret, 'u'));
-  assert.equal(seen.at(-1), 'Bearer good.token.value');
+test('notes api lets a logged-in user add, read, edit and delete notes', async () => {
+  const { api, store, call, A, B } = await notesFixture();
 
-  const post = fakeResponse();
-  await handler({ method: 'POST', headers: { authorization: 'Bearer good.token.value' } }, post);
-  assert.equal(post.statusCode, 405);
+  const created = await call(api.collection, 'POST', { token: A,
+    body: { title: '  첫 메모 ', body: '내용', owner_id: USER_B, userId: USER_B, role: 'admin' } });
+  assert.equal(created.statusCode, 201);
+  const id = created.body.id;
+  assert.match(id, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(Object.keys(created.body), ['id']);
+  assert.equal(store.rows[0].owner_id, USER_A, '저장되는 owner_id는 서버가 확인한 사용자 ID여야 함');
+  assert.equal(store.rows[0].title, '첫 메모');
+  assert.equal(store.rows[0].role, undefined);
+  assert.equal(store.rows[0].userId, undefined);
 
-  const broken = createHandler({ env, verify: async () => { throw new TypeError('invalid_student_identity_provider'); }, fetchImpl: async () => { throw new Error('no'); } });
-  const failed = fakeResponse();
-  await broken({ method: 'GET', headers: { authorization: 'Bearer good.token.value' } }, failed);
-  assert.equal(failed.statusCode, 500);
-  assert.doesNotMatch(JSON.stringify(failed.body), new RegExp(secret, 'u'));
+  const givenId = '22222222-2222-4222-8222-222222222222';
+  const withId = await call(api.collection, 'POST', { token: A, body: { id: givenId, title: '둘째', body: '' } });
+  assert.deepEqual(withId.body, { id: givenId });
+  assert.equal((await call(api.collection, 'POST', { token: A, body: { id: givenId, title: 'x', body: '' } })).statusCode, 409);
+  assert.equal((await call(api.collection, 'POST', { token: A, body: { id: 'not-a-uuid', title: 'x', body: '' } })).statusCode, 400);
+  const invalid = [{}, { title: '' }, { title: '   ' }, { title: 5 }, { title: 'x'.repeat(101) },
+    { title: 't', body: 7 }, { title: 't', body: 'x'.repeat(2001) }, []];
+  for (const bad of invalid) {
+    assert.equal((await call(api.collection, 'POST', { token: A, body: bad })).statusCode, 400, JSON.stringify(bad));
+  }
+
+  await call(api.collection, 'POST', { token: B, body: { title: 'B의 메모', body: 'b' } });
+  const list = await call(api.collection, 'GET', { token: A });
+  assert.equal(list.statusCode, 200);
+  assert.ok(Array.isArray(list.body));
+  assert.deepEqual(list.body.map(note => note.title), ['첫 메모', '둘째']);
+  assert.deepEqual(Object.keys(list.body[0]).sort(), ['body', 'id', 'title']);
+  assert.doesNotMatch(JSON.stringify(list.body), /owner_id/u);
+
+  const itemUrl = `/api/notes/${id}`;
+  const one = await call(api.item, 'GET', { token: A, url: itemUrl });
+  assert.deepEqual(one.body, { id, title: '첫 메모', body: '내용' });
+
+  const edited = await call(api.item, 'PUT', { token: A, url: itemUrl, body: { title: '고친 제목', body: '고친 내용', owner_id: USER_B } });
+  assert.equal(edited.statusCode, 200);
+  assert.deepEqual(edited.body, { id });
+  assert.equal(store.rows.find(row => row.id === id).owner_id, USER_A, '수정해도 owner_id는 바뀌지 않음');
+  assert.deepEqual((await call(api.item, 'GET', { token: A, url: itemUrl })).body, { id, title: '고친 제목', body: '고친 내용' });
+  assert.equal((await call(api.item, 'PUT', { token: A, url: itemUrl, body: { id: givenId, title: 't', body: '' } })).statusCode, 400);
+
+  assert.equal((await call(api.item, 'DELETE', { token: A, url: itemUrl })).statusCode, 200);
+  assert.equal((await call(api.item, 'GET', { token: A, url: itemUrl })).statusCode, 404);
+  assert.equal((await call(api.item, 'DELETE', { token: A, url: itemUrl })).statusCode, 404);
+  assert.equal((await call(api.item, 'PUT', { token: A, url: itemUrl, body: { title: 't', body: '' } })).statusCode, 404);
+  const before = store.calls.length;
+  assert.equal((await call(api.item, 'GET', { token: A, url: '/api/notes/not-a-uuid' })).statusCode, 404);
+  assert.equal(store.calls.length, before, '형식이 틀린 id는 저장소를 부르지 않음');
+
+  assert.doesNotMatch(JSON.stringify([list.body, created.body, one.body]), new RegExp(SECRET, 'u'));
+});
+
+test('notes api reports server setup problems without leaking the key', async () => {
+  const { createNotesApi } = await import('../src/notes-api.mjs');
+  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: SECRET };
+  const request = { method: 'GET', url: '/api/notes', headers: { authorization: 'Bearer a.b.c' } };
+  const broken = createNotesApi({ env, verify: async () => { throw new TypeError('invalid_student_identity_provider'); },
+    fetchImpl: async () => { throw new Error('no'); } });
+  const res = fakeResponse();
+  await broken.collection(request, res);
+  assert.equal(res.statusCode, 500);
+  const missing = createNotesApi({ env: {}, verify: async () => ({ userId: USER_A }) });
+  const none = fakeResponse();
+  await missing.collection(request, none);
+  assert.equal(none.statusCode, 500);
+  const down = createNotesApi({ env, verify: async () => ({ userId: USER_A }), fetchImpl: async () => { throw new Error('boom'); } });
+  const bad = fakeResponse();
+  await down.collection(request, bad);
+  assert.equal(bad.statusCode, 502);
+  assert.doesNotMatch(JSON.stringify([res.body, none.body, bad.body]), new RegExp(SECRET, 'u'));
 });
 
 test('aleph.config.json identityProvider is accepted by the starter login verifier', async () => {

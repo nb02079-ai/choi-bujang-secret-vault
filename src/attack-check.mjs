@@ -58,14 +58,16 @@ async function secondStepChecks(config, app) {
     const response = await send(new URL('/data.json', app));
     const data = response.ok ? await readJson(response) : null;
     const count = Array.isArray(data?.notes) ? data.notes.length : null;
+    const markerShown = data !== null && typeof data === 'object' && 'sampleMarker' in data;
     results.push({ attackId: 'static_data_json_empty',
-      expected: '공개 /data.json에는 가상 메모가 없어야 함',
-      observed: count === 0 ? `비로그인 /data.json의 notes가 비어 있음 (HTTP ${response.status})`
-        : count === null ? `/data.json을 읽었지만 notes 형식을 확인하지 못함 (HTTP ${response.status})`
-          : `비로그인 /data.json에서 메모 ${count}건이 보임 (HTTP ${response.status})` });
+      expected: '공개 /data.json에는 가상 메모와 시작 틀 확인 표시가 없어야 함',
+      observed: markerShown ? `비로그인 /data.json에 시작 틀 확인 표시가 남아 있음 (HTTP ${response.status})`
+        : count === 0 ? `비로그인 /data.json의 notes가 비어 있고 확인 표시가 없음 (HTTP ${response.status})`
+          : count === null ? `/data.json을 읽었지만 notes 형식을 확인하지 못함 (HTTP ${response.status})`
+            : `비로그인 /data.json에서 메모 ${count}건이 보임 (HTTP ${response.status})` });
   } catch {
     results.push({ attackId: 'static_data_json_empty',
-      expected: '공개 /data.json에는 가상 메모가 없어야 함', observed: '요청이 실패해 확인하지 못함' });
+      expected: '공개 /data.json에는 가상 메모와 시작 틀 확인 표시가 없어야 함', observed: '요청이 실패해 확인하지 못함' });
   }
 
   try {

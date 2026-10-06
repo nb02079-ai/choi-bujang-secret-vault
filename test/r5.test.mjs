@@ -68,14 +68,14 @@ test('step 2 attack check records only requests it sent', async () => {
     globalThis.fetch = async (url, init = {}) => {
       const path = new URL(String(url)).pathname;
       calls.push(`${init.method ?? 'GET'} ${path}`);
-      if (path === '/data.json') return Response.json({ sampleMarker: 'SAMPLE_NOTE_1', notes: [] });
+      if (path === '/data.json') return Response.json({ notes: [] });
       if (init.method === 'POST') return new Response('no', { status: 405 });
       return Response.json({ notes: [{ title: 'a', content: 'b' }] });
     };
     const results = await runAttackChecks({ ...config, step: 2 });
     assert.deepEqual(calls, ['GET /data.json', 'GET /api/notes', 'POST /api/notes']);
     const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
-    assert.match(byId.static_data_json_empty, /비어 있음/u);
+    assert.match(byId.static_data_json_empty, /비어 있고/u);
     assert.match(byId.anonymous_api_read, /1건이 읽힘/u);
     assert.match(byId.api_response_no_key, /없음/u);
     assert.match(byId.api_post_rejected, /405/u);
@@ -83,6 +83,12 @@ test('step 2 attack check records only requests it sent', async () => {
       assert.deepEqual(Object.keys(item).sort(), ['attackId', 'expected', 'observed']);
       assert.doesNotMatch(JSON.stringify(item), /"title"|"content"/u);
     }
+    assert.match(byId.static_data_json_empty, /확인 표시가 없음/u);
+    globalThis.fetch = async (url) => (new URL(String(url)).pathname === '/data.json'
+      ? Response.json({ sampleMarker: 'SAMPLE_NOTE_1', notes: [] })
+      : Response.json({ notes: [] }));
+    const marked = await runAttackChecks({ ...config, step: 2 });
+    assert.match(marked.find(item => item.attackId === 'static_data_json_empty').observed, /확인 표시가 남아 있음/u);
     globalThis.fetch = async () => { throw new Error('network'); };
     const failed = await runAttackChecks({ ...config, step: 2 });
     assert.equal(failed.length, 4);

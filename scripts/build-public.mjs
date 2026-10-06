@@ -16,6 +16,9 @@ if (!Array.isArray(data.notes)) {
 if (config.step >= 2 && data.notes.length > 0) {
   throw new Error('2단계부터 공개 data.json의 notes는 비어 있어야 합니다. 메모는 서버 함수로만 읽으세요.');
 }
+if (config.step >= 2 && 'sampleMarker' in data) {
+  throw new Error('2단계부터 공개 data.json에 시작 틀 확인 표시(sampleMarker)를 남기지 마세요. 1단계 공개 자료에만 쓰는 값입니다.');
+}
 await mkdir(resolve(root, 'public'), { recursive: true });
 await copyFile(source, output);
 console.log('실습용 공개 자료를 public/data.json에 복사했습니다.');

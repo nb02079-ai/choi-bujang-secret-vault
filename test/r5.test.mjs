@@ -97,3 +97,66 @@ test('step 2 attack check records only requests it sent', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+function fakeResponse() {
+  const res = { headers: {}, statusCode: 0, body: undefined };
+  res.setHeader = (key, value) => { res.headers[key.toLowerCase()] = value; };
+  res.status = (code) => { res.statusCode = code; return res; };
+  res.json = (body) => { res.body = body; return res; };
+  return res;
+}
+
+test('api/notes refuses without a verified login and never reads the data store', async () => {
+  const { createHandler } = await import('../api/notes.mjs');
+  const secret = 'sb_secret_testvalue_never_returned';
+  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: secret };
+  let storeCalls = 0;
+  const seen = [];
+  const handler = createHandler({
+    env,
+    verify: async (authorization) => { seen.push(authorization); return authorization === 'Bearer good.token.value' ? { kind: 'student', userId: 'u' } : null; },
+    fetchImpl: async (url, init) => {
+      storeCalls += 1;
+      assert.equal(init.headers.apikey, secret);
+      return Response.json([{ title: 'T', content: 'C', owner_id: 'hidden' }]);
+    },
+  });
+
+  for (const headers of [{}, { authorization: 'Bearer bad.token.value' },
+    { authorization: 'Bearer bad.token.value', 'x-user-id': 'admin', 'x-role': 'admin' }]) {
+    const res = fakeResponse();
+    await handler({ method: 'GET', headers, query: { userId: 'admin', role: 'admin' } }, res);
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.body, { error: '로그인이 필요합니다.' });
+  }
+  assert.equal(storeCalls, 0);
+
+  const ok = fakeResponse();
+  await handler({ method: 'GET', headers: { authorization: 'Bearer good.token.value', 'x-user-id': 'admin' } }, ok);
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(ok.body, { notes: [{ title: 'T', content: 'C' }] });
+  assert.doesNotMatch(JSON.stringify(ok.body), new RegExp(secret, 'u'));
+  assert.equal(seen.at(-1), 'Bearer good.token.value');
+
+  const post = fakeResponse();
+  await handler({ method: 'POST', headers: { authorization: 'Bearer good.token.value' } }, post);
+  assert.equal(post.statusCode, 405);
+
+  const broken = createHandler({ env, verify: async () => { throw new TypeError('invalid_student_identity_provider'); }, fetchImpl: async () => { throw new Error('no'); } });
+  const failed = fakeResponse();
+  await broken({ method: 'GET', headers: { authorization: 'Bearer good.token.value' } }, failed);
+  assert.equal(failed.statusCode, 500);
+  assert.doesNotMatch(JSON.stringify(failed.body), new RegExp(secret, 'u'));
+});
+
+test('aleph.config.json identityProvider is accepted by the starter login verifier', async () => {
+  const { createLoginVerifier } = await import('../src/verify-login.mjs');
+  const { readFileSync } = await import('node:fs');
+  const real = JSON.parse(readFileSync(new URL('../aleph.config.json', import.meta.url), 'utf8'));
+  const verifier = createLoginVerifier({ config: real, supabaseClient: { auth: { getClaims: async () => ({ error: new Error('x') }) } } });
+  assert.equal(await verifier(undefined), null);
+  assert.equal(await verifier('Bearer aaa.bbb.ccc'), null);
+  assert.equal(real.identityProvider.audience, 'authenticated');
+  assert.equal(real.identityProvider.jwksUrl, `${real.identityProvider.issuer}/.well-known/jwks.json`);
+  assert.doesNotMatch(JSON.stringify(real.identityProvider), /secret|service_role|eyJ/iu);
+});

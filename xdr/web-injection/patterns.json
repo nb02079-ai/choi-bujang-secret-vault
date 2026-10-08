@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "basis": {
+    "technique": "T1190",
+    "name": "Exploit Public-Facing Application",
+    "url": "https://attack.mitre.org/techniques/T1190/",
+    "checkedAt": "2026-10-08"
+  },
+  "patterns": [
+    {
+      "name": "sql_injection_repeated",
+      "technique": "T1190",
+      "weakness": "CWE-89",
+      "condition": "요청 인자(data.url의 쿼리) 안에 SQL 구문을 이어 붙인 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다.",
+      "fields": ["data.srcip", "data.url", "data.count"],
+      "thresholds": { "repeats": 5 },
+      "alertOnly": false,
+      "evidence": "T1190은 인터넷에 열린 응용의 약점을 악용해 처음 침투하는 기법(SQL 주입 언급)이고, CWE-89(SQL Injection)는 외부 입력으로 SQL 명령을 만들면서 명령을 바꿀 수 있는 특수 요소를 걸러 내지 않는 그 약점이다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": "https://cwe.mitre.org/data/definitions/89.html"
+    },
+    {
+      "name": "script_injection_repeated",
+      "technique": "T1190",
+      "weakness": "CWE-79",
+      "condition": "요청 인자(data.url의 쿼리) 안에 스크립트 태그를 끼워 넣은 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다.",
+      "fields": ["data.srcip", "data.url", "data.count"],
+      "thresholds": { "repeats": 5 },
+      "alertOnly": false,
+      "evidence": "T1190은 인터넷에 열린 응용의 약점을 악용해 처음 침투하는 기법이고, CWE-79(Cross-site Scripting)는 사용자가 조작할 수 있는 입력을 다른 사용자에게 보여 줄 웹 페이지 출력에 넣기 전에 걸러 내지 않는 그 약점이다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": "https://cwe.mitre.org/data/definitions/79.html"
+    },
+    {
+      "name": "path_traversal_repeated",
+      "technique": "T1190",
+      "weakness": "CWE-22",
+      "condition": "요청 인자(data.url의 쿼리) 안에 경로를 거슬러 올라가는 ../ 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다.",
+      "fields": ["data.srcip", "data.url", "data.count"],
+      "thresholds": { "repeats": 5 },
+      "alertOnly": false,
+      "evidence": "T1190은 인터넷에 열린 응용의 약점을 악용해 처음 침투하는 기법이고, CWE-22(Path Traversal)는 외부 입력으로 만든 경로의 특수 요소를 걸러 내지 않아 제한된 디렉터리 밖의 위치로 풀리게 하는 그 약점이다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": "https://cwe.mitre.org/data/definitions/22.html"
+    },
+    {
+      "name": "command_separator_repeated",
+      "technique": "T1190",
+      "weakness": "CWE-78",
+      "condition": "요청 인자(data.url의 쿼리) 안에 운영체제 명령을 이어 붙이는 구분자 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다. 지시한 신호(SQL·스크립트·../) 밖의 추가 패턴이라 알림만 한다.",
+      "fields": ["data.srcip", "data.url", "data.count"],
+      "thresholds": { "repeats": 5 },
+      "alertOnly": true,
+      "evidence": "T1190은 인터넷에 열린 응용의 약점을 악용해 처음 침투하는 기법이고, CWE-78(OS Command Injection)은 외부 입력으로 운영체제 명령을 만들면서 명령을 바꿀 수 있는 특수 요소를 걸러 내지 않는 그 약점이다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": "https://cwe.mitre.org/data/definitions/78.html"
+    },
+    {
+      "name": "single_injection_like_attempt",
+      "technique": "T1190",
+      "weakness": null,
+      "condition": "주입처럼 보이는 표기가 있지만 반복 기준(5건) 미만이거나, 설명에 따옴표·구분 문자·주입처럼 보이는 표기가 한 번 있다고 적혀 있다. 막지 않고 알림만 한다.",
+      "fields": ["data.url", "data.count", "rule.description"],
+      "thresholds": {},
+      "alertOnly": true,
+      "evidence": "T1190의 감지 지침은 접근 로그에서 공격 입력처럼 보이는 의심스러운 URL·매개변수 구조를 살펴보라고 하며, 한 번뿐인 표기는 반복이 확인되기 전까지 알림 수준으로 둔다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": null
+    }
+  ],
+  "notes": [
+    "thresholds의 숫자(5건)는 MITRE·CWE가 정한 값이 아니라 이 저장소 decide.mjs의 학생 기준이다. 근거는 기법과 약점의 모양이고, 숫자는 이 수업 경보 묶음에 맞춘 선택이다.",
+    "수업용 경보의 data.url은 실제 공격 문자열 대신 문서용 표식(doc-sql-…, doc-script-…, doc-up-…, doc-cmd-…, doc-mixed-…)을 쓴다. decide.mjs는 이 표식과 실제 공격 모양을 둘 다 찾는다.",
+    "decide.mjs는 이 파일을 읽지 않는다. 이 파일은 패턴 목록과 근거를 남기는 문서이며, 시험이 PATTERNS 상수와 같은지 확인한다."
+  ]
+}

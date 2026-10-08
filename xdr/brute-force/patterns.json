@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "basis": {
+    "technique": "T1110",
+    "name": "Brute Force",
+    "url": "https://attack.mitre.org/techniques/T1110/",
+    "checkedAt": "2026-10-08"
+  },
+  "patterns": [
+    {
+      "name": "rapid_failures_same_source",
+      "technique": "T1110.001",
+      "condition": "같은 주소의 로그인 실패가 짧은 시간 안에 연속해 쌓여 경보의 data.count가 15건 이상이다.",
+      "fields": ["data.srcip", "data.srcuser", "data.count"],
+      "thresholds": { "failures": 15 },
+      "evidence": "T1110.001(Password Guessing)은 반복적·순차적 방식으로 비밀번호를 추측하며, 감지 기준이 한 곳 이상의 원격 IP에서 같거나 비슷한 계정을 향한 인증 실패의 연속이다.",
+      "source": "https://attack.mitre.org/techniques/T1110/001/"
+    },
+    {
+      "name": "password_spraying_many_accounts",
+      "technique": "T1110.003",
+      "condition": "한 주소가 같은 비밀번호를 서로 다른 계정 여러 개에 넣어 경보의 data.accounts에 서로 다른 계정이 5개 이상 적혀 있다.",
+      "fields": ["data.srcip", "data.accounts"],
+      "thresholds": { "accounts": 5 },
+      "evidence": "T1110.003(Password Spraying)은 흔한 비밀번호 하나 또는 소수를 많은 서로 다른 계정에 시도하는 기법이고, 감지 기준이 정해진 시간 창 안에서 여러 계정에 걸친 인증 실패다.",
+      "source": "https://attack.mitre.org/techniques/T1110/003/"
+    },
+    {
+      "name": "failures_then_success",
+      "technique": "T1110",
+      "condition": "로그인 실패가 쌓인 뒤 성공했다는 설명(rule.description)이 같은 경보에 있다. 이때는 막지 않고 사람이 확인하도록 알린다.",
+      "fields": ["data.srcip", "data.srcuser", "data.count", "rule.description"],
+      "thresholds": {},
+      "evidence": "T1110의 감지 전략은 많은 실패 뒤에 같은 IP나 사용자에서 성공이 이어지는 경우를 의심스러운 신호로 든다.",
+      "source": "https://attack.mitre.org/techniques/T1110/"
+    }
+  ],
+  "notIncluded": [
+    { "technique": "T1110.002", "reason": "Password Cracking은 얻어 낸 해시를 밖에서 푸는 기법이라 로그인 실패 경보에 흔적이 남지 않는다." },
+    { "technique": "T1110.004", "reason": "Credential Stuffing은 유출된 계정 목록을 쓰는 기법이라 경보의 건수·계정 필드만으로 구분할 근거가 없다." }
+  ],
+  "notes": [
+    "thresholds의 숫자는 MITRE가 정한 값이 아니라 이 저장소 decide.mjs의 학생 기준이다. 근거는 기법의 모양이고, 숫자는 이 수업 경보 묶음에 맞춘 선택이다.",
+    "decide.mjs는 이 파일을 읽지 않는다. 이 파일은 패턴 목록과 근거를 남기는 문서이며, 시험이 thresholds와 decide.mjs의 상수가 같은지 확인한다."
+  ]
+}

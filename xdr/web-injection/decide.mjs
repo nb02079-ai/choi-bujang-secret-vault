@@ -4,7 +4,7 @@
 // 판정기 규칙을 대신하지 않고, 확인 단계 하나로 불러 쓰는 부품입니다.
 //
 // 막는 것은 SQL·스크립트·경로 거슬러 올라가기·명령 구분자가 같은 주소에서 반복된 명확한 경우뿐입니다.
-// 한 번뿐인 의심 표기나 반복 기준 미만은 알림까지만 합니다.
+// 한 번뿐인 의심 표기, 반복 기준 미만, Wazuh 규칙 수준 4~9의 한 번짜리 웹 요청 경보는 알림까지만 합니다. 수준 3 이하(성공·허가된 이벤트)는 기록만 합니다.
 
 // 패턴 목록: xdr/web-injection/patterns.json 과 같은 내용입니다(시험이 두 곳이 같은지 비교합니다).
 // 근거는 MITRE ATT&CK T1190 이고, 약점의 모양은 CWE-89·79·22·78 로 설명합니다. thresholds 의 숫자는 이 수업의 학생 기준입니다.
@@ -97,6 +97,25 @@ const PATTERNS = [
       "evidence": "T1190의 감지 지침은 접근 로그에서 공격 입력처럼 보이는 의심스러운 URL·매개변수 구조를 살펴보라고 하며, 한 번뿐인 표기는 반복이 확인되기 전까지 알림 수준으로 둔다.",
       "source": "https://attack.mitre.org/techniques/T1190/",
       "weaknessSource": null
+    },
+    {
+      "name": "mid_level_web_request",
+      "technique": "T1190",
+      "weakness": null,
+      "condition": "요청 주소(data.url)가 있는 경보의 Wazuh 규칙 수준(rule.level)이 4 이상 9 이하라서 한 번짜리 의심 이벤트로 분류되었지만, 주입 표기나 반복 기준을 채우지는 못했다. 수업 단어만 있는 요청과 평소보다 긴 주소가 여기에 든다. 막지 않고 알림만 한다.",
+      "fields": [
+        "rule.level",
+        "data.url",
+        "data.count"
+      ],
+      "thresholds": {
+        "levelMin": 4,
+        "levelMax": 9
+      },
+      "alertOnly": true,
+      "evidence": "T1190의 감지 지침은 공개 엔드포인트로 오는 비정상 요청과 의심스러운 URL·매개변수 구조를 살피라고 하고, Wazuh 규칙 수준 5~9는 오류·낮은 관련성 공격·처음 본 이벤트 같은 한 번짜리 의심 이벤트(10부터가 여러 번의 오류)라서 반복이 확인되기 전까지 알림으로 남긴다.",
+      "source": "https://attack.mitre.org/techniques/T1190/",
+      "weaknessSource": null
     }
   ];
 // PATTERNS-END
@@ -107,6 +126,7 @@ const SCRIPT = byName('script_injection_repeated');
 const PATH = byName('path_traversal_repeated');
 const COMMAND = byName('command_separator_repeated');
 const SINGLE = byName('single_injection_like_attempt');
+const LEVELED = byName('mid_level_web_request');
 const REPEATED = [
   { kind: 'sql', pattern: SQL },
   { kind: 'script', pattern: SCRIPT },
@@ -164,6 +184,12 @@ function repeatCount(value) {
   return Number.isInteger(number) && number >= 0 && number <= MAX_COUNT ? number : null;
 }
 
+// Wazuh 규칙 수준이 한 번짜리 의심 이벤트 구간(기본 4~9)인지 봅니다. 숫자나 숫자 문자열만 받습니다.
+function inLevelBand(value) {
+  const level = typeof value === 'number' ? value : (typeof value === 'string' && /^\d{1,2}$/u.test(value.trim()) ? Number(value) : NaN);
+  return Number.isInteger(level) && level >= LEVELED.thresholds.levelMin && level <= LEVELED.thresholds.levelMax;
+}
+
 // 1건부터 0.5, 기준 직전까지 0.84 아래, 기준에서 0.85, 기준의 두 배에서 0.95.
 function strength(value, limit) {
   if (value < 1) return 0;
@@ -203,6 +229,8 @@ export function decide(alert) {
     // 반복 기준에 못 미치는 주입 형태, 또는 설명이 한 번뿐인 의심 표기를 말하는 경우: 알림만.
     if (kinds.size && count >= 1) matches.push({ pattern: SINGLE, score: Math.min(strength(count, SQL.thresholds.repeats), ALERT_ONLY_CAP) });
     else if (WEAK_CUE.test(description)) matches.push({ pattern: SINGLE, score: ALERT_AT });
+    // 주입 표기가 없어도 Wazuh 가 한 번짜리 의심 이벤트(수준 4~9)로 분류한 웹 요청은 알림으로 남깁니다.
+    else if (inLevelBand(alert.rule?.level) && typeof data.url === 'string') matches.push({ pattern: LEVELED, score: ALERT_AT });
   }
   if (!matches.length) return result(0, '맞는 패턴 없음: 주입 형태가 없어 기록만 합니다.');
 

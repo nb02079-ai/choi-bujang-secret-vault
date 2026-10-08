@@ -34,10 +34,9 @@ test('decide: clear SQL, script and ../ repeats are blocked, the rest is alerted
     assert.equal(decision.action, decision.confidence >= 0.85 ? 'block' : decision.confidence >= 0.5 ? 'alert' : 'record', alert.id);
     counts[decision.action] += 1;
   }
-  assert.deepEqual(counts, { block: 8, alert: 4, record: 14 });
+  assert.deepEqual(counts, { block: 8, alert: 9, record: 9 });
   for (const id of ['wi-01', 'wi-02', 'wi-03', 'wi-04', 'wi-05', 'wi-06', 'wi-07', 'wi-08']) assert.equal(action(id), 'block', id);
-    for (const id of ['wi-09', 'wi-15', 'wi-16', 'wi-17']) assert.equal(action(id), 'alert', id);
-  for (const id of ['wi-10', 'wi-11', 'wi-12', 'wi-13', 'wi-14']) assert.equal(action(id), 'record', `${id} 수업 단어만 있는 평범한 요청`);
+    for (const id of ['wi-09', 'wi-10', 'wi-11', 'wi-12', 'wi-13', 'wi-14', 'wi-15', 'wi-16', 'wi-17']) assert.equal(action(id), 'alert', `${id} 애매한 시도는 알림으로만`);
   for (let n = 18; n <= 26; n += 1) assert.equal(action(`wi-${n}`), 'record', `wi-${n}`);
 });
 
@@ -112,4 +111,24 @@ test('decide.mjs stands alone: no import, no file, no network, a single synchron
   assert.equal(typeof decide(fixture.alerts[0]).then, 'undefined');
   assert.deepEqual(decide(fixture.alerts[0]), decide(fixture.alerts[0]));
   assert.doesNotMatch(decideSource, /respond|alerts\.log|appendFile|denyList/u);
+});
+
+test('decide: Wazuh level 4-9 web requests are only alerted, never blocked, and level 3 or below stays a record', () => {
+  const at = (level, url = '/search?q=select-course', count = 1) => decide(alertOf(url, count, { rule: { level, description: '시험' } }));
+  for (const level of [4, 5, 6, 7, 8, 9, '5', ' 7 ']) {
+    const decision = at(level);
+    assert.equal(decision.action, 'alert', String(level));
+    assert.equal(decision.confidence, 0.5);
+    assert.match(decision.reason, /mid_level_web_request/u);
+  }
+  for (const level of [0, 1, 2, 3, '3']) assert.equal(at(level).action, 'record', `수준 ${level}은 성공·허가된 이벤트라 기록만`);
+  for (const level of [10, 11, 12, 15]) assert.equal(at(level).action, 'record', `수준 ${level}은 이 패턴 구간 밖이고 다른 패턴도 안 맞으면 기록만`);
+  for (const level of [undefined, null, '', 'high', 5.5, -1, [5], {}, true, 100]) assert.equal(at(level).action, 'record', String(level));
+  assert.equal(at(5, '/search?q=week3', 50).action, 'alert', '주입 표기 없이 건수만 커도 알림까지');
+  assert.equal(at(9, '/search?q=week3', 1_000_000).confidence, 0.5, '이 패턴만으로는 막지 않음');
+  assert.equal(decide({ id: 'n', rule: { level: 5, description: '시험' }, data: { srcip: '203.0.113.9', count: '1' } }).action, 'record', '요청 주소가 없는 경보는 웹 요청이 아님');
+  assert.equal(decide({ id: 'n', rule: { level: 5, description: '시험' }, data: { srcip: '203.0.113.9', url: 5, count: '1' } }).action, 'record');
+  // 더 뚜렷한 패턴이 있으면 그쪽이 이깁니다.
+  assert.equal(at(5, '/n?q=doc-sql-x', 9).action, 'block');
+  assert.match(at(5, '/n?q=doc-sql-x', 1).reason, /single_injection_like_attempt/u);
 });

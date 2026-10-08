@@ -435,3 +435,44 @@ test('step 4 attack check probes the Data API with the public anon key only', as
     globalThis.fetch = originalFetch;
   }
 });
+
+test('step 5 attack check calls the original data url with the public anon key only', async () => {
+  const originalFetch = globalThis.fetch;
+  const key = 'sb_publishable_abcdefghij1234567890';
+  const original = 'https://projref.supabase.co/rest/v1/vault_notes';
+  const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
+  const seen = [];
+  const handler = (dataApiStatus, dataApiBody) => async (url, init = {}) => {
+    const target = new URL(String(url));
+    seen.push({ host: target.host, method: init.method ?? 'GET', search: target.search, apikey: init.headers?.apikey });
+    if (target.host === 'projref.supabase.co') return Response.json(dataApiBody, { status: dataApiStatus });
+    if (target.pathname === '/') return new Response(`<script>'${key}'</script>`, { status: 200 });
+    if (target.pathname === '/data.json') return Response.json({ notes: [] });
+    if ((init.method ?? 'GET') === 'PATCH') return new Response('no', { status: 405 });
+    return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+  };
+  try {
+    globalThis.fetch = handler(401, { code: '42501' });
+    const results = await runAttackChecks(step5);
+    const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+    assert.equal(byId.original_url_no_notes, '거부됨, 메모가 보이지 않음 (HTTP 401)');
+    assert.equal(byId.anon_direct_read_rejected, '거부됨 (HTTP 401)');
+    assert.match(byId.authenticated_direct_rejected, /^미실행/u);
+    assert.match(byId.logged_in_own_crud, /^미실행/u);
+    assert.match(byId.cross_user_access, /^미실행/u);
+    assert.ok(seen.filter(entry => entry.host === 'projref.supabase.co').every(entry => entry.apikey === key));
+    assert.ok(results.length <= 20);
+    assert.equal(new Set(results.map(item => item.attackId)).size, results.length);
+    assert.doesNotMatch(JSON.stringify(results), new RegExp(key, 'u'));
+
+    globalThis.fetch = handler(200, [{ id: 'x' }]);
+    const open = Object.fromEntries((await runAttackChecks(step5)).map(item => [item.attackId, item.observed]));
+    assert.match(open.original_url_no_notes, /^원본 주소에서 메모가 보임/u);
+
+    globalThis.fetch = handler(401, {});
+    const noUrl = Object.fromEntries((await runAttackChecks({ ...step5, originalApiUrl: `${original}?select=*` })).map(item => [item.attackId, item.observed]));
+    assert.match(noUrl.original_url_no_notes, /^미실행/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

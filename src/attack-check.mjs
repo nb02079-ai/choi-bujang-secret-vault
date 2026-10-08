@@ -162,7 +162,11 @@ async function thirdStepChecks(app) {
 // 공개 키는 화면 코드에 원래 들어 있는 값이라, 외부 사람이 하듯 배포된 페이지에서 읽어 씁니다.
 // 요청은 존재하지 않는 id 조건이나 필수 칸이 빠진 본문만 써서, 권한이 잘못 열려 있어도 자료가 바뀌지 않게 합니다.
 // authenticated 역할의 직접 접근과 A/B 로그인이 필요한 점검은 이 코드가 실행하지 않고 '미실행'으로 남깁니다.
+// 5단계부터 화면에 공개 키가 없으므로, 학생이 자기 터미널의 환경변수 SUPABASE_PUBLISHABLE_KEY에 넣어 둔 값을 먼저 씁니다.
+// 값은 결과·로그에 싣지 않습니다. 환경변수가 없으면 4단계처럼 배포된 페이지에서 찾습니다.
 async function readPublishableKey(app) {
+  const fromEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (typeof fromEnv === 'string' && /^sb_publishable_[A-Za-z0-9_-]{10,}$/u.test(fromEnv)) return fromEnv;
   try {
     const page = await (await send(app)).text();
     return /sb_publishable_[A-Za-z0-9_-]{10,}/u.exec(page)?.[0] ?? null;
@@ -195,7 +199,7 @@ async function anonDirectChecks(app, dataApi) {
   for (const check of anonChecks) {
     if (!dataApi || !key) {
       kept.push({ attackId: check.attackId, expected: check.expected,
-        observed: '미실행. 공개 anon 키나 Data API 주소를 배포된 페이지와 설정에서 찾지 못함' });
+        observed: '미실행. 공개 anon 키(환경변수 SUPABASE_PUBLISHABLE_KEY 또는 배포된 페이지)나 Data API 주소를 찾지 못함' });
       continue;
     }
     kept.push(await expectRejected(app, {
@@ -222,6 +226,8 @@ async function fifthStepChecks(config, app) {
   const results = (await anonDirectChecks(app, original))
     .filter(item => item.attackId !== 'logged_in_own_crud');
 
+  results.push(await pageKeyCheck(app));
+
   const expected = '공개 anon 키로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
   const key = original ? await readPublishableKey(app) : null;
   if (!original || !key) {
@@ -247,4 +253,20 @@ async function fifthStepChecks(config, app) {
   results.push({ attackId: 'logged_in_own_crud', expected: '정상 A 로그인 뒤에는 서버 함수로 자기 메모를 읽고 추가·수정·삭제할 수 있어야 함',
     observed: '미실행. 계정 정보를 코드에 넣지 않으므로 브라우저에서 학생이 직접 확인함' });
   return results;
+}
+
+// 첫 화면에 Supabase 공개 키(sb_publishable_… 또는 anon JWT)가 없어야 합니다. 키 값은 결과에 싣지 않습니다.
+async function pageKeyCheck(app) {
+  const expected = '첫 화면 코드에 Supabase 공개 키(sb_publishable_… 또는 anon 키)가 없어야 함';
+  try {
+    const response = await send(app);
+    const page = await response.text();
+    const shown = /sb_publishable_[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}/u.test(page);
+    return { attackId: 'page_no_public_key', expected,
+      observed: !response.ok ? `첫 화면을 읽지 못함 (HTTP ${response.status})`
+        : shown ? `첫 화면 코드에 공개 키 형태의 문자열이 보임 (HTTP ${response.status})`
+          : `첫 화면 코드에 공개 키 형태의 문자열이 없음 (HTTP ${response.status})` };
+  } catch {
+    return { attackId: 'page_no_public_key', expected, observed: '요청이 실패해 확인하지 못함' };
+  }
 }

@@ -47,7 +47,7 @@
 ## 3단계: 로그인과 메모 추가·수정·삭제
 
 **현재 작동하는 기능 (3단계 저장점):**
-- 화면 `/`에 Supabase Auth 이메일·비밀번호 로그인·로그아웃이 있습니다. 공식 `@supabase/supabase-js`를 쓰고, 화면 코드에는 공개용 Project URL과 publishable key만 있습니다. 로그인 실패 이유는 화면에 표시합니다.
+- 화면 `/`에 Supabase Auth 이메일·비밀번호 로그인·로그아웃이 있습니다. 공식 `@supabase/supabase-js`를 쓰고, 화면 코드에는 공개용 Project URL과 publishable key만 있었습니다(5단계에서 화면 밖으로 옮겼습니다. 아래 5단계 참고). 로그인 실패 이유는 화면에 표시합니다.
 - 서버는 요청의 `Authorization: Bearer` 토큰을 틀의 `src/verify-login.mjs`로만 검사합니다. 토큰이 없거나 검사에 실패하면 자료 저장소를 읽지 않고 401을 돌려줍니다. 요청에 실린 `userId`·`role`·`owner_id`는 쓰지 않고, 사용자 ID는 검사를 통과한 토큰에서만 얻습니다.
 - 로그인한 사용자는 가상 메모를 추가·수정·삭제할 수 있습니다. 추가할 때 `owner_id`는 서버가 확인한 사용자 ID로 저장합니다. 제목은 1~100자, 내용은 2000자 이하입니다. 코드는 `api/notes/index.mjs`, `api/notes/[id].mjs`, 공용 로직 `src/notes-api.mjs`입니다.
 - 검사에 쓴 발급자 정보(`issuer`, `audience`, `jwksUrl`, 비밀 제외)는 `aleph.config.json`의 `identityProvider`에 있습니다.
@@ -112,22 +112,24 @@
 ## 5단계: 자료 요청을 서버 한곳으로 모읍니다
 
 **현재 작동하는 기능 (5단계 저장점):**
-- 브라우저 코드(`public/index.html`)에서 `supabase` 클라이언트는 `supabase.auth`(로그인·로그아웃·세션 확인)에만 씁니다. 메모 읽기·추가·수정·삭제는 모두 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부르고, Supabase 자료 호출(`.from()`, `rpc`, `/rest/v1`)은 코드에서 찾지 못했습니다(검색으로 확인).
+- 브라우저 코드(`public/index.html`)는 Supabase를 직접 부르지 않습니다. `supabase-js`와 Project URL, 공개(publishable) 키를 화면에서 모두 없앴습니다. 로그인·토큰 갱신·로그아웃은 서버 함수 `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`(`src/auth-api.mjs`)이 Supabase Auth로 대신 전달하고, 메모 읽기·추가·수정·삭제는 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부릅니다. 로그인 토큰은 그 탭의 `sessionStorage`에만 두고 탭을 닫으면 사라집니다. 서버 함수는 이메일·비밀번호·토큰을 로그에 남기지 않고, 로그인 실패는 계정 존재 여부를 알리지 않는 같은 문구로 답합니다.
+- 로그인 서버 함수는 Vercel 환경변수 `SUPABASE_PUBLISHABLE_KEY`(공개용 키)를 서버에서만 읽습니다. 값은 학생이 Settings → Environment Variables에 직접 넣고, 넣은 뒤 Redeploy해야 합니다. 이 값이 없으면 로그인이 500(서버 설정 미완료)으로 실패합니다. `/api/auth/*`는 자료 API가 아니라서 `allowedRoutes`에 넣지 않았습니다.
 - 서버 함수의 로그인 검사, 소유자 비교, 서버 전용 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로입니다.
 - `aleph.config.json`의 `originalApiUrl`은 쿼리 없는 원본 자료 주소 `https://hcaygyndhpfqrwlfbpqt.supabase.co/rest/v1/vault_notes`입니다. 이 주소를 공개 anon 키로 직접 부르면 거부되어야 하고, 메모가 보이면 안 됩니다. 배포 신원 파일 `/aleph.json`에도 같은 주소가 `originalApiUrl`로 실립니다(5단계부터, 쿼리가 없는 `https://` 경로가 아니면 빌드가 실패합니다). 허용 경로 목록 `allowedRoutes`(`GET /api/notes` 같은 형식, 1개 이상)도 `/aleph.json`에 실리며, 비어 있거나 형식이 다르면 빌드가 실패합니다. `restoreRoute`는 아직 `null`입니다.
 - DB 쪽: 로컬 `supabase/004_revoke_direct_access.sql`(Git에 올리지 않음)이 `vault_notes`의 `PUBLIC`·`anon`·`authenticated` 권한을 모두 회수하고, `service_role`의 네 권한과 RLS가 남았는지 같은 트랜잭션에서 확인합니다. 003의 RLS 정책 네 개는 지우지 않고 2차 방어로 남깁니다.
 
 **다시 실행하는 방법:**
+0. Vercel 프로젝트의 Settings → Environment Variables에 `SUPABASE_PUBLISHABLE_KEY`(Supabase 대시보드의 공개 키)를 직접 넣고 Redeploy합니다. 코드·Git·채팅에는 적지 않습니다.
 1. SQL Editor에서 `004_revoke_direct_access.sql`을 `[1]` 적용 전 점검 → `[2]` 적용 → `[3]` 적용 후 점검 순서로 따로 실행합니다. 이 SQL은 Git에 없으므로 필요하면 코딩 도구에 다시 만들게 합니다.
 2. 배포 주소에서 A로 로그인해 메모를 읽고 추가·수정·삭제하고, B로도 해 봅니다. 각자 목록에는 자기 메모만 보여야 합니다.
 3. 로컬 시험은 `npm run test:r5`, 자기 점검과 제출 묶음은 `npm run bundle`입니다.
 
 **기록 범위:**
-- `npm run bundle`의 `src/attack-check.mjs`가 보낸 요청의 결과는 `artifacts/submission.json`에만 남고 이 README에는 적지 않습니다(심판의 판정이 아닙니다). 5단계에서는 토큰 없는 요청, 공개 anon 키로 원본 주소에 직접 보낸 4가지 요청, 원본 주소에서 메모가 보이는지 읽어 보는 요청을 보냅니다.
+- `npm run bundle`의 `src/attack-check.mjs`는 첫 화면에 공개 키 형태의 문자열이 없는지 읽어 보고(`page_no_public_key`), 공개 키가 화면에 없으므로 anon 직접 요청에는 터미널 환경변수 `SUPABASE_PUBLISHABLE_KEY`의 값을 씁니다(결과·로그에 싣지 않습니다). 환경변수가 없으면 그 요청들은 미실행으로 남습니다. 보낸 요청의 결과는 `artifacts/submission.json`에만 남고 이 README에는 적지 않습니다(심판의 판정이 아닙니다). 5단계에서는 토큰 없는 요청, 공개 anon 키로 원본 주소에 직접 보낸 4가지 요청, 원본 주소에서 메모가 보이는지 읽어 보는 요청을 보냅니다.
 - 미실행: 로그인 토큰을 실은 원본 주소 직접 요청(`authenticated_direct_rejected`), 정상 A 로그인 뒤 서버 함수 동작(`logged_in_own_crud`), B의 거부(`cross_user_access`). 계정 정보와 토큰을 코드에 넣지 않기 위해서이며 학생이 브라우저에서 직접 확인해야 합니다.
 - 004 SQL을 실제 학습 DB에 적용했는지와 그 점검 결과는 학생이 붙여 줄 때만 기록합니다. 코딩 도구는 DB에 접속하지 않았습니다.
 
-**남아 있는 약점:** 4단계의 약점이 그대로입니다. 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 공개 anon 키가 화면 코드에 있다는 사실과 2단계의 과거 노출은 해소되지 않았습니다.
+**남아 있는 약점:** 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
 
 ## 다음 단계의 코딩 도구에 전달할 규칙
 

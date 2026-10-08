@@ -499,3 +499,143 @@ test('deployment identity lists allowedRoutes from step 5 and rejects empty or m
     assert.throws(() => deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original, allowedRoutes: bad }), undefined, JSON.stringify(bad));
   }
 });
+
+// 로그인 서버 함수: Supabase Auth를 흉내 내는 가짜 fetch만 씁니다. 실제 Supabase나 계정은 부르지 않습니다.
+test('auth api forwards login, refresh and logout without exposing keys or echoing passwords', async () => {
+  const { createAuthApi } = await import('../src/auth-api.mjs');
+  const PUBLISHABLE = 'sb_publishable_testvalue_only_for_server';
+  const ACCESS = 'aaaa.bbbb.cccc';
+  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE };
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    const target = new URL(String(url));
+    seen.push({ path: target.pathname, search: target.search, apikey: init.headers.apikey,
+      authorization: init.headers.Authorization, body: init.body });
+    const body = JSON.parse(init.body);
+    if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 });
+    if (target.search === '?grant_type=password') {
+      return body.password === 'right-password'
+        ? Response.json({ access_token: ACCESS, refresh_token: 'refresh1234', expires_in: 3600, token_type: 'bearer',
+          user: { id: 'secret-user-id', email: 'a@example.test', app_metadata: { role: 'x' } } })
+        : Response.json({ error_code: 'invalid_credentials' }, { status: 400 });
+    }
+    return body.refresh_token === 'refresh1234'
+      ? Response.json({ access_token: ACCESS, refresh_token: 'refresh5678', expires_at: 4102444800, user: { email: 'a@example.test' } })
+      : Response.json({ error_code: 'refresh_token_not_found' }, { status: 400 });
+  };
+  const api = createAuthApi({ env, fetchImpl });
+  const call = async (handler, method, { body, headers = {} } = {}) => {
+    const res = fakeResponse();
+    await handler({ method, body, headers }, res);
+    return res;
+  };
+
+  const ok = await call(api.login, 'POST', { body: { email: ' a@example.test ', password: 'right-password' } });
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(Object.keys(ok.body).sort(), ['access_token', 'email', 'expires_at', 'refresh_token']);
+  assert.equal(ok.body.email, 'a@example.test');
+  assert.ok(ok.body.expires_at > Math.floor(Date.now() / 1000));
+  assert.equal(ok.headers['cache-control'], 'no-store');
+  assert.equal(seen[0].apikey, PUBLISHABLE);
+  assert.equal(JSON.parse(seen[0].body).email, 'a@example.test', '이메일은 앞뒤 공백을 지워서 보냄');
+  assert.doesNotMatch(JSON.stringify(ok.body), /secret-user-id|sb_publishable/u, '응답에 키·내부 id를 싣지 않음');
+
+  const wrong = await call(api.login, 'POST', { body: { email: 'a@example.test', password: 'wrong' } });
+  assert.equal(wrong.statusCode, 401);
+  assert.equal(wrong.body.error, '이메일 또는 비밀번호가 맞지 않습니다.');
+  assert.doesNotMatch(JSON.stringify(wrong.body), /wrong|invalid_credentials/u);
+  for (const bad of [undefined, null, {}, { email: 'a@example.test' }, { email: 'a@example.test', password: 7 },
+    { email: 'x'.repeat(300), password: 'p' }, { email: 'a@example.test', password: '' }, [1], 'not json{']) {
+    const res = await call(api.login, 'POST', { body: bad });
+    assert.equal(res.statusCode, 400, JSON.stringify(bad));
+  }
+  const before = seen.length;
+  assert.equal((await call(api.login, 'GET')).statusCode, 405);
+  assert.equal((await call(api.refresh, 'PUT')).statusCode, 405);
+  assert.equal((await call(api.logout, 'DELETE')).statusCode, 405);
+  assert.equal(seen.length, before, '허용하지 않는 방식은 Supabase를 부르지 않음');
+
+  const refreshed = await call(api.refresh, 'POST', { body: { refresh_token: 'refresh1234' } });
+  assert.equal(refreshed.statusCode, 200);
+  assert.equal(refreshed.body.refresh_token, 'refresh5678');
+  const stale = await call(api.refresh, 'POST', { body: { refresh_token: 'refreshXXXX' } });
+  assert.equal(stale.statusCode, 401);
+  assert.equal((await call(api.refresh, 'POST', { body: { refresh_token: 'bad token!' } })).statusCode, 400);
+
+  const loggedOut = await call(api.logout, 'POST', { headers: { authorization: `Bearer ${ACCESS}` } });
+  assert.equal(loggedOut.statusCode, 200);
+  assert.equal(seen.at(-1).authorization, `Bearer ${ACCESS}`);
+  assert.equal((await call(api.logout, 'POST')).statusCode, 401);
+  assert.equal((await call(api.logout, 'POST', { headers: { authorization: 'Bearer nope' } })).statusCode, 401);
+});
+
+test('auth api reports setup and connection problems without leaking secrets', async () => {
+  const { createAuthApi } = await import('../src/auth-api.mjs');
+  const body = { email: 'a@example.test', password: 'pw-never-logged' };
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    const missing = fakeResponse();
+    await createAuthApi({ env: { SUPABASE_URL: 'https://example-project.supabase.co' } }).login({ method: 'POST', body }, missing);
+    assert.equal(missing.statusCode, 500);
+    const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_testvalue_only_for_server' };
+    const down = fakeResponse();
+    await createAuthApi({ env, fetchImpl: async () => { throw new Error(`boom ${body.password}`); } }).login({ method: 'POST', body }, down);
+    assert.equal(down.statusCode, 502);
+    const broken = fakeResponse();
+    await createAuthApi({ env, fetchImpl: async () => Response.json({ access_token: 'not-a-jwt' }) }).login({ method: 'POST', body }, broken);
+    assert.equal(broken.statusCode, 502, '형식이 맞지 않는 토큰은 그대로 전달하지 않음');
+    const error500 = fakeResponse();
+    await createAuthApi({ env, fetchImpl: async () => new Response('x', { status: 500 }) }).login({ method: 'POST', body }, error500);
+    assert.equal(error500.statusCode, 502);
+  } finally {
+    console.error = originalError;
+  }
+  assert.doesNotMatch(logged.join('\n'), /pw-never-logged|a@example\.test|sb_publishable/u);
+});
+
+test('step 5 attack check reports whether the page still shows a public key and can use a local env key', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const key = 'sb_publishable_abcdefghij1234567890';
+  const original = 'https://projref.supabase.co/rest/v1/vault_notes';
+  const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
+  const seen = [];
+  const handler = (pageHtml) => async (url, init = {}) => {
+    const target = new URL(String(url));
+    seen.push({ host: target.host, apikey: init.headers?.apikey });
+    if (target.host === 'projref.supabase.co') return Response.json({ code: '42501' }, { status: 401 });
+    if (target.pathname === '/') return new Response(pageHtml, { status: 200 });
+    if (target.pathname === '/data.json') return Response.json({ notes: [] });
+    if ((init.method ?? 'GET') === 'PATCH') return new Response('no', { status: 405 });
+    return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+  };
+  try {
+    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    globalThis.fetch = handler('<html>로그인 화면</html>');
+    let byId = Object.fromEntries((await runAttackChecks(step5)).map(item => [item.attackId, item.observed]));
+    assert.match(byId.page_no_public_key, /^첫 화면 코드에 공개 키 형태의 문자열이 없음/u);
+    assert.match(byId.anon_direct_read_rejected, /^미실행/u, '화면에 키가 없고 환경변수도 없으면 직접 요청은 미실행');
+    assert.match(byId.original_url_no_notes, /^미실행/u);
+    assert.equal(seen.some(entry => entry.host === 'projref.supabase.co'), false);
+
+    process.env.SUPABASE_PUBLISHABLE_KEY = key;
+    const results = await runAttackChecks(step5);
+    byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+    assert.equal(byId.anon_direct_read_rejected, '거부됨 (HTTP 401)');
+    assert.equal(byId.original_url_no_notes, '거부됨, 메모가 보이지 않음 (HTTP 401)');
+    assert.ok(seen.filter(entry => entry.host === 'projref.supabase.co').every(entry => entry.apikey === key));
+    assert.doesNotMatch(JSON.stringify(results), new RegExp(key, 'u'), '환경변수 키도 결과에 싣지 않음');
+    assert.ok(results.length <= 20);
+
+    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    globalThis.fetch = handler(`<script>'${key}'</script>`);
+    byId = Object.fromEntries((await runAttackChecks(step5)).map(item => [item.attackId, item.observed]));
+    assert.match(byId.page_no_public_key, /^첫 화면 코드에 공개 키 형태의 문자열이 보임/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SUPABASE_PUBLISHABLE_KEY = originalEnv;
+  }
+});

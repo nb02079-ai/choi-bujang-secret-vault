@@ -73,11 +73,49 @@
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
-    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
-
-    // Project URL과 publishable key는 브라우저에 공개해도 되는 값입니다. 비밀키는 여기에 넣지 않습니다.
-    const supabase = createClient('https://hcaygyndhpfqrwlfbpqt.supabase.co',
-      'sb_publishable_j3xyRhkca4lquGrIEHq9Hg_5QN7ei8o');
+    // 이 화면에는 Supabase 주소도 키도 없습니다. 로그인·갱신·로그아웃과 모든 자료 요청은 서버 함수(/api/...)로만 보냅니다.
+    // 로그인 토큰은 이 탭의 sessionStorage에만 두고, 탭을 닫으면 사라집니다.
+    const STORE_KEY = 'vault.session';
+    const readStored = () => {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(STORE_KEY));
+        return saved && typeof saved.access_token === 'string' && typeof saved.refresh_token === 'string'
+          && Number.isFinite(saved.expires_at) ? saved : null;
+      } catch { return null; }
+    };
+    const writeStored = (next) => {
+      try {
+        if (next) sessionStorage.setItem(STORE_KEY, JSON.stringify(next));
+        else sessionStorage.removeItem(STORE_KEY);
+      } catch { /* 저장소를 못 쓰면 이 탭의 메모리에만 둡니다 */ }
+    };
+    let session = readStored();
+    const setSession = (next) => {
+      session = next;
+      writeStored(next);
+      apply(next);
+    };
+    const authPost = async (path, payload, token) => {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(path, {
+        method: 'POST', cache: 'no-store', headers, body: JSON.stringify(payload ?? {}),
+      });
+      let result = null;
+      try { result = await response.json(); } catch { /* 본문 없음 */ }
+      return { ok: response.ok, status: response.status, result };
+    };
+    const nearExpiry = () => session && session.expires_at * 1000 - Date.now() < 60000;
+    let refreshing = null;
+    const refreshSession = () => {
+      refreshing ??= (async () => {
+        try {
+          const reply = await authPost('/api/auth/refresh', { refresh_token: session.refresh_token });
+          setSession(reply.ok ? reply.result : (reply.status === 401 ? null : session));
+        } catch { /* 연결 문제면 지금 세션을 그대로 둡니다 */ } finally { refreshing = null; }
+      })();
+      return refreshing;
+    };
 
     const form = document.querySelector('#login-form');
     const sessionBox = document.querySelector('#session');
@@ -88,12 +126,12 @@
       message.textContent = text;
       message.classList.toggle('ok', ok);
     };
-    const showSession = (session) => {
-      const signedIn = Boolean(session?.user);
+    const showSession = (next) => {
+      const signedIn = Boolean(next?.access_token);
       form.hidden = signedIn;
       sessionBox.hidden = !signedIn;
       document.querySelector('#editor').hidden = !signedIn;
-      who.textContent = signedIn ? `로그인됨: ${session.user.email}` : '';
+      who.textContent = signedIn ? `로그인됨: ${next.email}` : '';
     };
 
     form.addEventListener('submit', async (event) => {
@@ -101,12 +139,14 @@
       loginButton.disabled = true;
       say('로그인 중입니다.');
       try {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: form.email.value.trim(), password: form.password.value,
-        });
+        const reply = await authPost('/api/auth/login', { email: form.email.value.trim(), password: form.password.value });
         form.password.value = '';
-        if (error) say(`로그인하지 못했습니다: ${error.message}`);
-        else say('로그인했습니다.', true);
+        if (reply.ok) {
+          setSession(reply.result);
+          say('로그인했습니다.', true);
+        } else {
+          say(`로그인하지 못했습니다: ${reply.result?.error ?? `HTTP ${reply.status}`}`);
+        }
       } catch (error) {
         say(`로그인하지 못했습니다: ${error.message}`);
       } finally {
@@ -115,9 +155,10 @@
     });
 
     document.querySelector('#logout').addEventListener('click', async () => {
-      const { error } = await supabase.auth.signOut();
-      if (error) say(`로그아웃하지 못했습니다: ${error.message}`);
-      else say('로그아웃했습니다.', true);
+      const old = session;
+      setSession(null);
+      say('로그아웃했습니다.', true);
+      if (old) authPost('/api/auth/logout', {}, old.access_token).catch(() => { /* 화면은 이미 로그아웃됨 */ });
     });
 
     const list = document.querySelector('#notes');
@@ -136,8 +177,8 @@
 
     // 모든 자료 요청은 로그인 토큰을 실어 서버 API로 보냅니다. 사용자 ID는 서버가 토큰에서 확인합니다.
     const callApi = async (method, path, payload) => {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
+      if (nearExpiry()) await refreshSession();
+      const token = session?.access_token;
       if (!token) throw new Error('로그인이 필요합니다.');
       const headers = { Authorization: `Bearer ${token}` };
       if (payload !== undefined) headers['Content-Type'] = 'application/json';
@@ -257,17 +298,17 @@
 
     // 로그인 상태가 바뀔 때만 화면과 자료를 다시 맞춥니다.
     let appliedToken;
-    const apply = (session) => {
-      const token = session?.access_token ?? null;
+    const apply = (next) => {
+      const token = next?.access_token ?? null;
       if (token === appliedToken) return;
       appliedToken = token;
-      currentSession = session ?? null;
-      showSession(session);
+      currentSession = next ?? null;
+      showSession(next);
       sayNote('');
       loadNotes();
     };
-    supabase.auth.onAuthStateChange((_event, session) => apply(session));
-    apply((await supabase.auth.getSession()).data.session);
+    if (nearExpiry()) await refreshSession();
+    apply(session);
   </script>
 </body>
 </html>

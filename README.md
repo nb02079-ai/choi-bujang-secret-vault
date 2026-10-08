@@ -127,7 +127,8 @@
 **기록 범위:**
 - `npm run bundle`의 `src/attack-check.mjs`는 첫 화면에 공개 키 형태의 문자열이 없는지 읽어 보고(`page_no_public_key`), 공개 키가 화면에 없으므로 anon 직접 요청에는 터미널 환경변수 `SUPABASE_PUBLISHABLE_KEY`의 값을 씁니다(결과·로그에 싣지 않습니다). 환경변수가 없으면 그 요청들은 미실행으로 남습니다. 보낸 요청의 결과는 `artifacts/submission.json`에만 남고 이 README에는 적지 않습니다(심판의 판정이 아닙니다). 5단계에서는 토큰 없는 요청, 공개 anon 키로 원본 주소에 직접 보낸 4가지 요청, 원본 주소에서 메모가 보이는지 읽어 보는 요청을 보냅니다.
 - 미실행: 로그인 토큰을 실은 원본 주소 직접 요청(`authenticated_direct_rejected`), 정상 A 로그인 뒤 서버 함수 동작(`logged_in_own_crud`), B의 거부(`cross_user_access`). 계정 정보와 토큰을 코드에 넣지 않기 위해서이며 학생이 브라우저에서 직접 확인해야 합니다.
-- 004 SQL을 실제 학습 DB에 적용했는지와 그 점검 결과는 학생이 붙여 줄 때만 기록합니다. 코딩 도구는 DB에 접속하지 않았습니다.
+- **학생이 SQL Editor에서 실행해 보고한 004 적용 후 점검 결과:** `role_table_grants`에 `PUBLIC`·`anon`·`authenticated` 행이 없습니다. `has_table_privilege`는 `anon`과 `authenticated`가 모두 `(없음)`이고 `service_role`은 `SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`를 유지합니다. `has_any_column_privilege`는 `anon`과 `authenticated` 모두 `(없음)`입니다. RLS는 켜져 있고(`true`) 정책은 4개(`policy_count`)입니다. 이 값은 학생이 붙여 준 결과이고, 코딩 도구는 DB에 접속하지 않았습니다. 적용 전 `[1]` 결과는 받지 않아 대조하지 못했습니다.
+- 004 적용 뒤 `authenticated` 토큰으로 원본 주소를 직접 불러 거부되는지는 코드로 실행하지 않았습니다(`authenticated_direct_rejected`는 미실행).
 
 **남아 있는 약점:** 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
 

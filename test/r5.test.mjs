@@ -476,3 +476,13 @@ test('step 5 attack check calls the original data url with the public anon key o
     globalThis.fetch = originalFetch;
   }
 });
+
+test('deployment identity lists the original data url from step 5 only when it is a plain https path', () => {
+  const original = 'https://projref.supabase.co/rest/v1/vault_notes';
+  assert.equal(deploymentIdentity(env, { ...config, step: 4 }).originalApiUrl, undefined);
+  assert.equal(deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original }).originalApiUrl, original);
+  for (const bad of [null, undefined, '', 'http://projref.supabase.co/rest/v1/vault_notes', `${original}?select=*`,
+    `${original}?`, `${original}#x`, 'https://user:pw@projref.supabase.co/rest/v1/vault_notes']) {
+    assert.throws(() => deploymentIdentity(env, { ...config, step: 5, originalApiUrl: bad }), undefined, String(bad));
+  }
+});

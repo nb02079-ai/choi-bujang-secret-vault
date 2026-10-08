@@ -132,6 +132,36 @@
 
 **남아 있는 약점:** 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
 
+## 보너스 xdr-01: 무차별 로그인 공격 경보
+
+수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/brute-force.json`(가상 28건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, 3~5단계 자료실과 `src/decider.mjs`는 건드리지 않았습니다.
+
+**현재 작동하는 기능 (xdr-01 저장점):**
+- `xdr/brute-force/decide.mjs`: 단독으로 계산하는 `decide(alert)` 하나만 내보냅니다(import·파일·네트워크 사용 없음). 근거는 MITRE ATT&CK T1110이며, 패턴 3개(`rapid_failures_same_source`, `password_spraying_many_accounts`, `failures_then_success`)가 맨 위 상수로 들어 있고 `patterns.json`과 같은 내용입니다. 확신도(경보가 패턴과 맞는 정도, 0~1)가 0.85 이상이면 `block`, 0.5 이상이면 `alert`, 그 아래는 `record`입니다. 15건·5개 같은 숫자는 MITRE 값이 아니라 이 수업의 학생 기준입니다.
+- `xdr/brute-force/read-alerts.mjs`: 확인용으로 시각·주소·계정·수준·설명만 뽑습니다(비밀값처럼 보이는 값은 가림). `decide.mjs`와 서로 불러오지 않습니다.
+- `xdr/brute-force/respond.mjs`: `block`만 만료 시각(기본 15분)과 근거 경보 번호가 붙은 거부 규칙으로 넣고, 알림을 `xdr/alerts.log`(Git 제외)에 한 줄씩 쌓습니다. 내부망·보호 주소, 성공이 섞인 경보, 근거 번호가 없는 경보는 규칙으로 만들지 않습니다. 판정기에는 `withBruteForceDeny`로 거부만 더하는 방식으로 꽂으며 기본값은 아무것도 막지 않습니다.
+
+**다시 실행하는 방법:**
+1. `npm run xdr:run -- brute-force`: `xdr/brute-force/result.json`을 만듭니다(`counts` 확인).
+2. `node xdr/brute-force/respond.mjs`: 경보를 시간 순서대로 다시 흘려 거부 규칙과 알림 로그를 만듭니다. 로그 위치를 바꾸려면 `--log <경로>`를 붙입니다.
+3. 시험: `node --test test/xdr-*.test.mjs`
+
+**실제로 실행한 결과 (2026-10-08, 학생의 자기 점검이며 심판의 판정이 아님):**
+
+| 확인 | 결과 |
+|---|---|
+| `result.json`의 `counts` | block 10, alert 9, record 9 (경보 28건과 일치) |
+| 명확한 공격(`bf-01`~`bf-10`) | 모두 `block`, 다시 흘리면 거부 규칙 9개(`bf-02`는 `bf-01`과 같은 주소라 알림만) |
+| 애매한 시도(`bf-11`~`bf-19`) | 모두 `alert`, 알림 로그에만 남고 거부 규칙 없음 |
+| 정상 이벤트(규칙 수준 3 이하 9건) | 모두 `record`, `block` 0건, 알림 로그에도 없음 |
+
+"정상 이벤트"는 정답표가 없어 규칙 수준 3 이하로 정한 기준입니다.
+
+**아직 연결되지 않았거나 확인하지 못한 것:**
+- 판정 요청(`aleph.decision.v1`)에는 주소 필드가 없어, `withBruteForceDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `bruteforce_blocked`의 등록 여부는 확인하지 않았습니다.
+- `src/decider.mjs`는 시작 틀 그대로이고 `RULE_IDS`에 `xdr.bruteforce.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- `bf-11`, `bf-12`, `bf-17`처럼 실패 뒤 성공한 경보는 애매한 사례로 `alert`에 뒀습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.

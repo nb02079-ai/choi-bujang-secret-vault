@@ -14,6 +14,14 @@ function originalApiUrl(value) {
   return null;
 }
 
+// 5단계부터 허용 경로 목록("METHOD /path")을 배포 신원에 적습니다. 비어 있거나 형식이 다르면 거부합니다.
+const ROUTE = /^(GET|POST|PUT|PATCH|DELETE) \/[A-Za-z0-9_\-./:]*$/u;
+function allowedRoutes(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= 50
+    && value.every((item) => typeof item === 'string' && ROUTE.test(item)) && new Set(value).size === value.length
+    ? [...value] : null;
+}
+
 export function deploymentIdentity(env, config) {
   const owner = env.VERCEL_GIT_REPO_OWNER;
   const repo = env.VERCEL_GIT_REPO_SLUG;
@@ -33,6 +41,10 @@ export function deploymentIdentity(env, config) {
   if (config.step >= 5 && !original) {
     throw new Error('5단계부터 aleph.config.json의 originalApiUrl에 쿼리 없는 원본 자료 HTTPS 주소가 필요합니다.');
   }
+  const routes = config.step >= 5 ? allowedRoutes(config.allowedRoutes) : null;
+  if (config.step >= 5 && !routes) {
+    throw new Error('5단계부터 aleph.config.json의 allowedRoutes에 허용 경로가 하나 이상 필요합니다. 형식은 "GET /api/notes"입니다.');
+  }
   return {
     schema: 'aleph.defense.deployment.v1',
     step: config.step,
@@ -42,5 +54,6 @@ export function deploymentIdentity(env, config) {
     judgeIssuer: config.judgeIssuer,
     sampleMarker: config.sampleMarker,
     ...(original ? { originalApiUrl: original } : {}),
+    ...(routes ? { allowedRoutes: routes } : {}),
   };
 }

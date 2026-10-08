@@ -42,6 +42,11 @@ test('patterns: the repeated signals can block, the single-attempt pattern only 
     assert.equal(byName[name].thresholds.repeats, 5, name);
   }
   assert.equal(byName.single_injection_like_attempt.alertOnly, true);
+  assert.equal(byName.mid_level_web_request.alertOnly, true, '한 번짜리 의심 이벤트는 알림만');
+  assert.deepEqual(byName.mid_level_web_request.thresholds, { levelMin: 4, levelMax: 9 });
+  assert.match(byName.mid_level_web_request.evidence, /Wazuh/u);
+  assert.match(byName.mid_level_web_request.condition, /4 이상 9 이하/u);
+  assert.equal(doc.basisExtra[0].url, 'https://documentation.wazuh.com/current/user-manual/ruleset/rules/rules-classification.html');
   assert.match(byName.command_separator_repeated.condition, /명령을 이어 붙이는 구분자/u);
 });
 

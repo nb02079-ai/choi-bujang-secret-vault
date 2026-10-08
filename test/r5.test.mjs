@@ -479,10 +479,23 @@ test('step 5 attack check calls the original data url with the public anon key o
 
 test('deployment identity lists the original data url from step 5 only when it is a plain https path', () => {
   const original = 'https://projref.supabase.co/rest/v1/vault_notes';
+  const routes = ['GET /api/notes', 'PUT /api/notes/:id'];
   assert.equal(deploymentIdentity(env, { ...config, step: 4 }).originalApiUrl, undefined);
-  assert.equal(deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original }).originalApiUrl, original);
+  assert.equal(deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original, allowedRoutes: routes }).originalApiUrl, original);
   for (const bad of [null, undefined, '', 'http://projref.supabase.co/rest/v1/vault_notes', `${original}?select=*`,
     `${original}?`, `${original}#x`, 'https://user:pw@projref.supabase.co/rest/v1/vault_notes']) {
-    assert.throws(() => deploymentIdentity(env, { ...config, step: 5, originalApiUrl: bad }), undefined, String(bad));
+    assert.throws(() => deploymentIdentity(env, { ...config, step: 5, originalApiUrl: bad, allowedRoutes: routes }), undefined, String(bad));
+  }
+});
+
+test('deployment identity lists allowedRoutes from step 5 and rejects empty or malformed lists', () => {
+  const original = 'https://projref.supabase.co/rest/v1/vault_notes';
+  const routes = ['GET /api/notes', 'POST /api/notes', 'GET /api/notes/:id', 'PUT /api/notes/:id', 'DELETE /api/notes/:id'];
+  const identity = deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original, allowedRoutes: routes });
+  assert.deepEqual(identity.allowedRoutes, routes);
+  assert.equal(deploymentIdentity(env, { ...config, step: 4 }).allowedRoutes, undefined);
+  for (const bad of [undefined, null, [], 'GET /api/notes', ['/api/notes'], ['GET api/notes'], ['TRACE /api/notes'],
+    ['GET /api/notes', 'GET /api/notes'], [42], ['GET /api/notes?x=1']]) {
+    assert.throws(() => deploymentIdentity(env, { ...config, step: 5, originalApiUrl: original, allowedRoutes: bad }), undefined, JSON.stringify(bad));
   }
 });

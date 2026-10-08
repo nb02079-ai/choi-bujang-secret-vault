@@ -109,6 +109,26 @@
 - `/aleph.json`에는 1단계 시작 틀 확인 표시(`sampleMarker`)가 남아 있습니다. 배포 신원 파일이 설정값을 그대로 적기 때문입니다.
 - 2단계에서 적은 과거 노출은 해소되지 않았습니다. 옛 공개 커밋, `origin/main`, 태그 `r5-rc1`에 옛 가상 메모가 남아 있습니다.
 
+## 5단계: 자료 요청을 서버 한곳으로 모읍니다
+
+**현재 작동하는 기능 (5단계 저장점):**
+- 브라우저 코드(`public/index.html`)에서 `supabase` 클라이언트는 `supabase.auth`(로그인·로그아웃·세션 확인)에만 씁니다. 메모 읽기·추가·수정·삭제는 모두 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부르고, Supabase 자료 호출(`.from()`, `rpc`, `/rest/v1`)은 코드에서 찾지 못했습니다(검색으로 확인).
+- 서버 함수의 로그인 검사, 소유자 비교, 서버 전용 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로입니다.
+- `aleph.config.json`의 `originalApiUrl`은 쿼리 없는 원본 자료 주소 `https://hcaygyndhpfqrwlfbpqt.supabase.co/rest/v1/vault_notes`입니다. 이 주소를 공개 anon 키로 직접 부르면 거부되어야 하고, 메모가 보이면 안 됩니다. `restoreRoute`는 아직 `null`입니다.
+- DB 쪽: 로컬 `supabase/004_revoke_direct_access.sql`(Git에 올리지 않음)이 `vault_notes`의 `PUBLIC`·`anon`·`authenticated` 권한을 모두 회수하고, `service_role`의 네 권한과 RLS가 남았는지 같은 트랜잭션에서 확인합니다. 003의 RLS 정책 네 개는 지우지 않고 2차 방어로 남깁니다.
+
+**다시 실행하는 방법:**
+1. SQL Editor에서 `004_revoke_direct_access.sql`을 `[1]` 적용 전 점검 → `[2]` 적용 → `[3]` 적용 후 점검 순서로 따로 실행합니다. 이 SQL은 Git에 없으므로 필요하면 코딩 도구에 다시 만들게 합니다.
+2. 배포 주소에서 A로 로그인해 메모를 읽고 추가·수정·삭제하고, B로도 해 봅니다. 각자 목록에는 자기 메모만 보여야 합니다.
+3. 로컬 시험은 `npm run test:r5`, 자기 점검과 제출 묶음은 `npm run bundle`입니다.
+
+**기록 범위:**
+- `npm run bundle`의 `src/attack-check.mjs`가 보낸 요청의 결과는 `artifacts/submission.json`에만 남고 이 README에는 적지 않습니다(심판의 판정이 아닙니다). 5단계에서는 토큰 없는 요청, 공개 anon 키로 원본 주소에 직접 보낸 4가지 요청, 원본 주소에서 메모가 보이는지 읽어 보는 요청을 보냅니다.
+- 미실행: 로그인 토큰을 실은 원본 주소 직접 요청(`authenticated_direct_rejected`), 정상 A 로그인 뒤 서버 함수 동작(`logged_in_own_crud`), B의 거부(`cross_user_access`). 계정 정보와 토큰을 코드에 넣지 않기 위해서이며 학생이 브라우저에서 직접 확인해야 합니다.
+- 004 SQL을 실제 학습 DB에 적용했는지와 그 점검 결과는 학생이 붙여 줄 때만 기록합니다. 코딩 도구는 DB에 접속하지 않았습니다.
+
+**남아 있는 약점:** 4단계의 약점이 그대로입니다. 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 공개 anon 키가 화면 코드에 있다는 사실과 2단계의 과거 노출은 해소되지 않았습니다.
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.

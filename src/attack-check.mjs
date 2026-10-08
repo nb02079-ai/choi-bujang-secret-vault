@@ -30,7 +30,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4].includes(config.step)) {
+  if (![1, 2, 3, 4, 5].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -38,7 +38,8 @@ export async function runAttackChecks(config) {
   if (config.step === 1) return firstStepChecks(config, app);
   if (config.step === 2) return secondStepChecks(config, app);
   if (config.step === 3) return thirdStepChecks(app);
-  return fourthStepChecks(config, app);
+  if (config.step === 4) return fourthStepChecks(config, app);
+  return fifthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -171,6 +172,12 @@ async function readPublishableKey(app) {
 }
 
 async function fourthStepChecks(config, app) {
+  let dataApi = null;
+  try { dataApi = new URL('/rest/v1/vault_notes', new URL(config.identityProvider.issuer).origin); } catch { /* 미실행으로 남김 */ }
+  return anonDirectChecks(app, dataApi);
+}
+
+async function anonDirectChecks(app, dataApi) {
   const kept = (await thirdStepChecks(app))
     .filter(item => !['logged_in_crud', 'cross_user_access'].includes(item.attackId));
 
@@ -184,8 +191,6 @@ async function fourthStepChecks(config, app) {
     { attackId: 'anon_direct_delete_rejected', expected: 'anon 공개 키로 Data API에 직접 삭제하면 거부되어야 함',
       query: `?id=eq.${SAMPLE_ID}`, init: { method: 'DELETE' } },
   ];
-  let dataApi = null;
-  try { dataApi = new URL('/rest/v1/vault_notes', new URL(config.identityProvider.issuer).origin); } catch { /* 미실행으로 남김 */ }
   const key = dataApi ? await readPublishableKey(app) : null;
   for (const check of anonChecks) {
     if (!dataApi || !key) {
@@ -204,4 +209,42 @@ async function fourthStepChecks(config, app) {
   kept.push({ attackId: 'cross_user_access', expected: 'B가 A의 메모를 읽거나 고치거나 지울 수 없고 소유자도 바꿀 수 없어야 함',
     observed: '미실행. A·B 로그인이 필요해 이 코드는 실행하지 않음. 서버의 소유자 비교는 로컬 시험(가짜 검사기·메모리 저장소)으로만 확인함' });
   return kept;
+}
+
+// 5단계: 자료 요청은 서버 함수 한곳으로 모읍니다. 쿼리 없는 원본 자료 주소(config.originalApiUrl)를 공개 anon 키로 직접 불러
+// 거부되는지, 그리고 메모가 하나도 보이지 않는지 기록합니다. authenticated 토큰이 필요한 점검은 미실행으로 남깁니다.
+async function fifthStepChecks(config, app) {
+  let original = null;
+  try {
+    original = new URL(config.originalApiUrl);
+    if (original.protocol !== 'https:' || original.search || original.hash || original.username || original.password) original = null;
+  } catch { /* 미실행으로 남김 */ }
+  const results = (await anonDirectChecks(app, original))
+    .filter(item => item.attackId !== 'logged_in_own_crud');
+
+  const expected = '공개 anon 키로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
+  const key = original ? await readPublishableKey(app) : null;
+  if (!original || !key) {
+    results.push({ attackId: 'original_url_no_notes', expected,
+      observed: '미실행. 원본 자료 주소(originalApiUrl)나 공개 anon 키를 찾지 못함' });
+  } else {
+    try {
+      const response = await send(`${original.href}?select=id&limit=1`, { headers: { apikey: key } });
+      const data = response.ok ? await readJson(response) : null;
+      const count = Array.isArray(data) ? data.length : null;
+      results.push({ attackId: 'original_url_no_notes', expected,
+        observed: !response.ok ? `거부됨, 메모가 보이지 않음 (HTTP ${response.status})`
+          : count === 0 ? `메모가 보이지 않음 (HTTP ${response.status})`
+            : count === null ? `응답 형식을 확인하지 못함 (HTTP ${response.status})`
+              : `원본 주소에서 메모가 보임 (HTTP ${response.status})` });
+    } catch {
+      results.push({ attackId: 'original_url_no_notes', expected, observed: '요청이 실패해 확인하지 못함' });
+    }
+  }
+  results.push({ attackId: 'authenticated_direct_rejected',
+    expected: '로그인 토큰을 실어 원본 자료 주소를 직접 불러도 거부되어야 함',
+    observed: '미실행. 로그인 토큰을 코드에 넣지 않으므로 이 코드는 실행하지 않음' });
+  results.push({ attackId: 'logged_in_own_crud', expected: '정상 A 로그인 뒤에는 서버 함수로 자기 메모를 읽고 추가·수정·삭제할 수 있어야 함',
+    observed: '미실행. 계정 정보를 코드에 넣지 않으므로 브라우저에서 학생이 직접 확인함' });
+  return results;
 }

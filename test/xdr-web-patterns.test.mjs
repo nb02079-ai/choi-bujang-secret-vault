@@ -33,17 +33,16 @@ test('patterns: each has a name, a condition and exactly one line of evidence gr
   }
 });
 
-test('patterns: the three requested signals are present and can block, extra ones only alert', () => {
+test('patterns: the repeated signals can block, the single-attempt pattern only alerts', () => {
   assert.match(byName.sql_injection_repeated.condition, /SQL 구문/u);
   assert.match(byName.script_injection_repeated.condition, /스크립트 태그/u);
   assert.match(byName.path_traversal_repeated.condition, /\.\.\//u);
-  for (const name of ['sql_injection_repeated', 'script_injection_repeated', 'path_traversal_repeated']) {
+  for (const name of ['sql_injection_repeated', 'script_injection_repeated', 'path_traversal_repeated', 'command_separator_repeated']) {
     assert.equal(byName[name].alertOnly, false, name);
     assert.equal(byName[name].thresholds.repeats, 5, name);
   }
-  assert.equal(byName.command_separator_repeated.alertOnly, true, '지시한 신호 밖의 추가 패턴은 알림만');
   assert.equal(byName.single_injection_like_attempt.alertOnly, true);
-  assert.match(byName.command_separator_repeated.condition, /추가 패턴/u);
+  assert.match(byName.command_separator_repeated.condition, /명령을 이어 붙이는 구분자/u);
 });
 
 test('patterns: every field a pattern reads exists in the fixture alerts', () => {

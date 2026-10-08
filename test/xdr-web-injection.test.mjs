@@ -34,15 +34,15 @@ test('respond: replaying blocks only the clear injection repeats and lets normal
     assert.equal(response.decision, shouldBeBlocked ? 'deny' : 'allow', alert.id);
   }
   const denied = [...outcomes].filter(([, result]) => result.outcome === 'denied').map(([id]) => id).sort();
-  assert.deepEqual(denied, ['wi-01', 'wi-03', 'wi-04', 'wi-05', 'wi-07', 'wi-08']);
+  assert.deepEqual(denied, ['wi-01', 'wi-03', 'wi-04', 'wi-05', 'wi-06', 'wi-07', 'wi-08']);
   assert.equal(outcomes.get('wi-02').skipped, 'duplicate', '같은 주소(wi-01)는 이미 막혀 있음');
-  for (const id of ['wi-06', 'wi-09', 'wi-15', 'wi-16', 'wi-17']) assert.equal(outcomes.get(id).outcome, 'alerted', id);
+  for (const id of ['wi-09', 'wi-15', 'wi-16', 'wi-17']) assert.equal(outcomes.get(id).outcome, 'alerted', id);
   for (const id of ['wi-10', 'wi-14', 'wi-18', 'wi-26']) assert.equal(outcomes.get(id).outcome, 'recorded', id);
   assert.equal(read('../xdr/fixtures/web-injection.json'), before);
 
   const lines = (await readFile(logFile, 'utf8')).split('\n').filter(Boolean);
-  assert.equal(lines.filter((line) => line.split(' ')[1] === 'BLOCK').length, 6);
-  assert.equal(lines.filter((line) => line.split(' ')[1] === 'ALERT').length, 6);
+  assert.equal(lines.filter((line) => line.split(' ')[1] === 'BLOCK').length, 7);
+  assert.equal(lines.filter((line) => line.split(' ')[1] === 'ALERT').length, 5);
   assert.ok(lines.every((line) => line.includes(' module=web-injection ')));
   assert.doesNotMatch(lines.join('\n'), /doc-|user0\d|\/notes|\/search|SQL|스크립트/u, 'URL·계정·경보 설명은 로그에 싣지 않음');
 });

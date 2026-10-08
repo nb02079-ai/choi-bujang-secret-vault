@@ -34,9 +34,9 @@
     },
     {
       "alertId": "wi-06",
-      "action": "alert",
-      "confidence": 0.8,
-      "reason": "command_separator_repeated: 이 수업에서는 막지 않고 알림만 합니다."
+      "action": "block",
+      "confidence": 0.95,
+      "reason": "command_separator_repeated: 같은 주소에서 반복된 명확한 주입 시도라 막습니다."
     },
     {
       "alertId": "wi-07",
@@ -160,8 +160,8 @@
     }
   ],
   "counts": {
-    "block": 7,
-    "alert": 5,
+    "block": 8,
+    "alert": 4,
     "record": 14
   }
 }

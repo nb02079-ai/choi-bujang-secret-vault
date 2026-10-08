@@ -34,10 +34,9 @@ test('decide: clear SQL, script and ../ repeats are blocked, the rest is alerted
     assert.equal(decision.action, decision.confidence >= 0.85 ? 'block' : decision.confidence >= 0.5 ? 'alert' : 'record', alert.id);
     counts[decision.action] += 1;
   }
-  assert.deepEqual(counts, { block: 7, alert: 5, record: 14 });
-  for (const id of ['wi-01', 'wi-02', 'wi-03', 'wi-04', 'wi-05', 'wi-07', 'wi-08']) assert.equal(action(id), 'block', id);
-  assert.equal(action('wi-06'), 'alert', '지시한 신호 밖의 명령 구분자는 반복돼도 알림까지');
-  for (const id of ['wi-09', 'wi-15', 'wi-16', 'wi-17']) assert.equal(action(id), 'alert', id);
+  assert.deepEqual(counts, { block: 8, alert: 4, record: 14 });
+  for (const id of ['wi-01', 'wi-02', 'wi-03', 'wi-04', 'wi-05', 'wi-06', 'wi-07', 'wi-08']) assert.equal(action(id), 'block', id);
+    for (const id of ['wi-09', 'wi-15', 'wi-16', 'wi-17']) assert.equal(action(id), 'alert', id);
   for (const id of ['wi-10', 'wi-11', 'wi-12', 'wi-13', 'wi-14']) assert.equal(action(id), 'record', `${id} 수업 단어만 있는 평범한 요청`);
   for (let n = 18; n <= 26; n += 1) assert.equal(action(`wi-${n}`), 'record', `wi-${n}`);
 });
@@ -54,7 +53,8 @@ test('decide: real attack shapes are recognised, plain words are not, encoding d
   assert.equal(decide(alertOf('/files?path=../../etc/passwd', 50)).action, 'block', '../ 가 같은 주소에서 반복되면 막음');
   assert.equal(decide(alertOf('/files?path=../../etc/passwd', 4)).action, 'alert', '반복 기준 미만이면 알림까지');
   assert.equal(decide(alertOf('/files?path=..%2f..%2fx', 50)).action, 'block', '인코딩해도 찾음');
-  assert.equal(decide(alertOf('/n?q=a;cat /x', 50)).action, 'alert', '명령 구분자도 알림까지');
+  assert.equal(decide(alertOf('/n?q=a;cat /x', 50)).action, 'block', '명령 구분자도 반복되면 막음');
+  assert.equal(decide(alertOf('/n?q=a;cat /x', 4)).action, 'alert', '반복 기준 미만이면 알림까지');
 });
 
 test('decide: boundary values, mixed markers and the confidence ladder', () => {

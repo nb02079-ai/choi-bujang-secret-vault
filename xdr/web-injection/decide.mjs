@@ -1,10 +1,10 @@
-// 웹 접근 경보에서 SQL 구문·스크립트 태그·경로 거슬러 올라가기(../) 형태를 가려내 block / alert / record로 나눕니다.
+// 웹 접근 경보에서 SQL 구문·스크립트 태그·경로 거슬러 올라가기(../)·명령 구분자 형태를 가려내 block / alert / record로 나눕니다.
 // 이 파일은 혼자 계산합니다: 다른 파일·패키지를 불러오지 않고, 파일을 읽거나 쓰지 않고, 바깥에 묻지 않습니다.
 // 경보 원본은 고치지 않습니다. 같은 경보에는 항상 같은 답을 냅니다(저장된 상태 없음).
 // 판정기 규칙을 대신하지 않고, 확인 단계 하나로 불러 쓰는 부품입니다.
 //
-// 막는 것은 SQL·스크립트·경로 거슬러 올라가기가 같은 주소에서 반복된 명확한 경우뿐입니다.
-// 지시한 신호 밖의 명령 구분자 형태는 반복되어도 알림까지만 합니다. 한 번뿐인 의심 표기도 알림까지만 합니다.
+// 막는 것은 SQL·스크립트·경로 거슬러 올라가기·명령 구분자가 같은 주소에서 반복된 명확한 경우뿐입니다.
+// 한 번뿐인 의심 표기나 반복 기준 미만은 알림까지만 합니다.
 
 // 패턴 목록: xdr/web-injection/patterns.json 과 같은 내용입니다(시험이 두 곳이 같은지 비교합니다).
 // 근거는 MITRE ATT&CK T1190 이고, 약점의 모양은 CWE-89·79·22·78 로 설명합니다. thresholds 의 숫자는 이 수업의 학생 기준입니다.
@@ -68,7 +68,7 @@ const PATTERNS = [
       "name": "command_separator_repeated",
       "technique": "T1190",
       "weakness": "CWE-78",
-      "condition": "요청 인자(data.url의 쿼리) 안에 운영체제 명령을 이어 붙이는 구분자 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다. 지시한 신호(SQL·스크립트·../) 밖의 추가 패턴이라 알림만 한다.",
+      "condition": "요청 인자(data.url의 쿼리) 안에 운영체제 명령을 이어 붙이는 구분자 형태가 있고, 같은 주소에서 반복되어 경보의 data.count가 5건 이상이다. 처음 지시한 신호(SQL·스크립트·../) 밖이었으나 학생이 막기 대상으로 추가했다.",
       "fields": [
         "data.srcip",
         "data.url",
@@ -77,7 +77,7 @@ const PATTERNS = [
       "thresholds": {
         "repeats": 5
       },
-      "alertOnly": true,
+      "alertOnly": false,
       "evidence": "T1190은 인터넷에 열린 응용의 약점을 악용해 처음 침투하는 기법이고, CWE-78(OS Command Injection)은 외부 입력으로 운영체제 명령을 만들면서 명령을 바꿀 수 있는 특수 요소를 걸러 내지 않는 그 약점이다.",
       "source": "https://attack.mitre.org/techniques/T1190/",
       "weaknessSource": "https://cwe.mitre.org/data/definitions/78.html"

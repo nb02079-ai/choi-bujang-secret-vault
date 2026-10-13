@@ -305,12 +305,10 @@ async function seventhStepChecks(config, app) {
     const ok = normal.decision === 'allow' && asked.decision === 'step_up'
       && asked.reasonCode === 'step_up_required' && confirmed.decision === 'allow';
     results.push({ attackId: 'step_up_required_local', expected,
-      observed: `로컬 가상 사건 연습: 정상 ${normal.decision}, 복합 이상 ${asked.decision}·${asked.reasonCode}, 재확인 뒤 ${confirmed.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님` });
+      observed: `로컬 가상 사건 연습: 정상 ${normal.decision}, 복합 이상 ${asked.decision}·${asked.reasonCode}, 재확인 뒤 ${confirmed.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행(제공 엔진의 새 로그인 시각 검증 계약을 확인하지 못함)` });
   } catch {
-    results.push({ attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
+    results.push({ attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
   }
-  results.push({ attackId: 'relogin_block_live', expected: '다시 로그인 확인 전에는 실제 자료가 막히고, 새 로그인 뒤 요청은 다시 판정되어 허용되어야 함',
-    observed: '미실행. 제공 엔진이 새 로그인 시각을 검증하는 계약을 이 저장소에서 확인하지 못함' });
   return results;
 }
 

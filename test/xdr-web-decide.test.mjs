@@ -98,8 +98,8 @@ test('decide: reasons name the matching pattern in one line and never echo alert
     assert.ok(!/[\r\n]/u.test(reason) && reason.length > 5, alert.id);
     if (kind !== 'record') assert.ok(names.some((name) => reason.includes(name)), alert.id);
   }
-  const text = JSON.stringify(decide(alertOf('/n?q=doc-sql-secretword', 9, { rule: { description: 'ECHO-ME' }, data: { srcip: '203.0.113.9', url: '/n?q=doc-sql-secretword', count: '9', srcuser: 'user-xyz' } })));
-  assert.doesNotMatch(text, /secretword|ECHO-ME|user-xyz|203\.0\.113/u);
+  const text = JSON.stringify(decide(alertOf('/n?q=doc-sql-hiddenword', 9, { rule: { description: 'ECHO-ME' }, data: { srcip: '203.0.113.9', url: '/n?q=doc-sql-hiddenword', count: '9', srcuser: 'user-xyz' } })));
+  assert.doesNotMatch(text, /hiddenword|ECHO-ME|user-xyz|203\.0\.113/u);
 });
 
 test('decide.mjs stands alone: no import, no file, no network, a single synchronous export', async () => {

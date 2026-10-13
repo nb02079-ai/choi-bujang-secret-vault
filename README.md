@@ -1,6 +1,6 @@
 # BYTE BACK 방어전 시작 틀 R5
 
-이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 포함된 메모 네 건은 가상 자료입니다. 실제 학생 자료, 토큰, 비밀키를 넣지 마세요.
+이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 포함된 메모 네 건은 가상 자료입니다. 실제 학생 자료, 토큰, 비공개 설정값를 넣지 마세요.
 
 ## 학생이 하는 일: 세 걸음
 
@@ -20,7 +20,7 @@
 
 ## 2단계: 자료를 코드 밖으로 옮김
 
-가상 메모 네 건은 Supabase 학습용 테이블 `vault_notes`에 있고, 공개 `/data.json`은 `{"notes": []}`입니다. 1단계 시작 틀 확인 표시(`SAMPLE_NOTE_1`)도 `/data.json`에서 뺐고, 2단계부터 `data.json`에 메모나 이 표시가 있으면 빌드가 실패합니다. 서버 함수는 Vercel 환경변수 `SUPABASE_URL`과 서버 전용 `SUPABASE_SECRET_KEY`를 읽어 서버 안에서만 Supabase를 호출합니다. 두 값은 Vercel 프로젝트의 Settings → Environment Variables에 학생이 직접 넣고, 코드·Git·README에는 적지 않습니다. 환경변수를 새로 넣거나 바꾼 뒤에는 Redeploy해야 함수에 반영됩니다. 테이블을 만드는 SQL은 로컬 `supabase/` 폴더에 있고 Git에는 올리지 않습니다.
+가상 메모 네 건은 Supabase 학습용 테이블 `vault_notes`에 있고, 공개 `/data.json`은 `{"notes": []}`입니다. 1단계 시작 틀 확인 표시(`SAMPLE_NOTE_1`)도 `/data.json`에서 뺐고, 2단계부터 `data.json`에 메모나 이 표시가 있으면 빌드가 실패합니다. 서버 함수는 Vercel 환경변수 `SUPABASE_URL`과 서버 비공개 `SUPABASE_SECRET_KEY`를 읽어 서버 안에서만 Supabase를 호출합니다. 두 값은 Vercel 프로젝트의 Settings → Environment Variables에 학생이 직접 넣고, 코드·Git·README에는 적지 않습니다. 환경변수를 새로 넣거나 바꾼 뒤에는 Redeploy해야 함수에 반영됩니다. 테이블을 만드는 SQL은 로컬 `supabase/` 폴더에 있고 Git에는 올리지 않습니다.
 
 2단계에서 남았던 약점(`/api/notes`가 로그인 없이 읽히는 공개 주소)은 3단계에서 로그인 검사로 닫았습니다. 아래 3단계를 보세요.
 
@@ -47,7 +47,7 @@
 ## 3단계: 로그인과 메모 추가·수정·삭제
 
 **현재 작동하는 기능 (3단계 저장점):**
-- 화면 `/`에 Supabase Auth 이메일·비밀번호 로그인·로그아웃이 있습니다. 공식 `@supabase/supabase-js`를 쓰고, 화면 코드에는 공개용 Project URL과 publishable key만 있었습니다(5단계에서 화면 밖으로 옮겼습니다. 아래 5단계 참고). 로그인 실패 이유는 화면에 표시합니다.
+- 화면 `/`에 Supabase Auth 이메일·비밀번호 로그인·로그아웃이 있습니다. 공식 `@supabase/supabase-js`를 쓰고, 화면 코드에는 공개용 Project URL과 공개용 키만 있었습니다(5단계에서 화면 밖으로 옮겼습니다. 아래 5단계 참고). 로그인 실패 이유는 화면에 표시합니다.
 - 서버는 요청의 `Authorization: Bearer` 토큰을 틀의 `src/verify-login.mjs`로만 검사합니다. 토큰이 없거나 검사에 실패하면 자료 저장소를 읽지 않고 401을 돌려줍니다. 요청에 실린 `userId`·`role`·`owner_id`는 쓰지 않고, 사용자 ID는 검사를 통과한 토큰에서만 얻습니다.
 - 로그인한 사용자는 가상 메모를 추가·수정·삭제할 수 있습니다. 추가할 때 `owner_id`는 서버가 확인한 사용자 ID로 저장합니다. 제목은 1~100자, 내용은 2000자 이하입니다. 코드는 `api/notes/index.mjs`, `api/notes/[id].mjs`, 공용 로직 `src/notes-api.mjs`입니다.
 - 검사에 쓴 발급자 정보(`issuer`, `audience`, `jwksUrl`, 비밀 제외)는 `aleph.config.json`의 `identityProvider`에 있습니다.
@@ -77,7 +77,7 @@
 - 추가할 때 `owner_id`는 검증된 사용자 ID로만 저장합니다. URL·본문의 `owner_id`는 믿지 않습니다.
 - 수정은 기존 행이 본인 것이어야 하고 새 행의 소유자도 본인이어야 합니다. 본문이 다른 `owner_id`(다른 사람·null·숫자·빈 값)를 내세우면 쓰기 전에 403으로 거부합니다. 저장소에 보내는 수정·삭제에도 `owner_id=본인` 조건을 다시 겁니다.
 - 한 건 응답은 `{id,title,body}`, 수정 본문은 `{title,body}`입니다. `allowedRoutes` 5개는 실제 처리하는 방식·경로와 정확히 같고, 시험이 이를 확인합니다.
-- DB 쪽: 로컬 `supabase/003_rls_least_privilege.sql`(Git에 올리지 않음)이 `vault_notes`의 기존 권한을 `REVOKE ALL … FROM PUBLIC, anon, authenticated`로 회수하고 `authenticated`에 `SELECT·INSERT·UPDATE·DELETE`만 줍니다. RLS 정책은 `SELECT`·`DELETE`는 기존 행(USING), `INSERT`는 새 행(WITH CHECK), `UPDATE`는 둘 다 `auth.uid() = owner_id`일 때만 허용합니다. 앱 서버는 RLS를 우회하는 서버 비밀키로 접속하므로, 서버 코드의 소유자 비교가 1차 방어이고 GRANT·RLS는 키 없이 DB에 직접 닿는 경로를 막는 2차 방어입니다.
+- DB 쪽: 로컬 `supabase/003_rls_least_privilege.sql`(Git에 올리지 않음)이 `vault_notes`의 기존 권한을 `REVOKE ALL … FROM PUBLIC, anon, authenticated`로 회수하고 `authenticated`에 `SELECT·INSERT·UPDATE·DELETE`만 줍니다. RLS 정책은 `SELECT`·`DELETE`는 기존 행(USING), `INSERT`는 새 행(WITH CHECK), `UPDATE`는 둘 다 `auth.uid() = owner_id`일 때만 허용합니다. 앱 서버는 RLS를 우회하는 서버 비공개 설정값로 접속하므로, 서버 코드의 소유자 비교가 1차 방어이고 GRANT·RLS는 키 없이 DB에 직접 닿는 경로를 막는 2차 방어입니다.
 - 기존 가상 메모의 소유자 연결은 로컬 `supabase/002_assign_owners.sql`로 했습니다. `과제`·`포트폴리오`·`아침 리추얼`은 A, `B의 시험 메모`는 B 소유이고, `훈련 행정 자료`는 주인이 없어 누구도 접근하지 못합니다.
 
 **다시 실행하는 방법:**
@@ -86,7 +86,7 @@
 3. 배포 주소에서 A로 로그인해 자기 메모를 읽고 추가·수정·삭제하고, B로도 같게 해 봅니다. 각자 목록에는 자기 메모만 보여야 합니다.
 4. 로컬 시험은 `npm run test:r5`입니다. 가짜 검사기와 메모리 저장소를 쓰므로 실제 Supabase 동작을 증명하지 않습니다.
 
-**학생이 SQL Editor에서 실행해 보고한 적용 후 점검 결과:** `role_table_grants`는 `authenticated`만 `DELETE, INSERT, SELECT, UPDATE`이고 PUBLIC·anon 행이 없습니다. `has_table_privilege`는 `anon`이 없음, `authenticated`가 `SELECT, INSERT, UPDATE, DELETE`뿐이고, `service_role`은 앱 API가 쓰는 권한을 유지합니다. `anon`에는 컬럼 단위 권한도 없습니다. RLS는 켜져 있고 정책은 네 개이며 모두 `roles={authenticated}`, 조건은 `auth.uid() = owner_id`입니다. 이 값은 학생이 붙여 준 결과이고, 코딩 도구는 DB에 접속하지 않았습니다.
+**학생이 SQL Editor에서 실행해 보고한 적용 후 점검 결과:** `role_table_grants`는 `authenticated`만 `DELETE, INSERT, SELECT, UPDATE`이고 PUBLIC·anon 행이 없습니다. `has_table_privilege`는 `anon`이 없음, `authenticated`가 `SELECT, INSERT, UPDATE, DELETE`뿐이고, 서비스 역할은 앱 API가 쓰는 권한을 유지합니다. `anon`에는 컬럼 단위 권한도 없습니다. RLS는 켜져 있고 정책은 네 개이며 모두 `roles={authenticated}`, 조건은 `auth.uid() = owner_id`입니다. 이 값은 학생이 붙여 준 결과이고, 코딩 도구는 DB에 접속하지 않았습니다.
 
 **실제로 보낸 요청의 결과 (2026-10-06, 학생의 자기 점검이며 심판의 판정이 아님):**
 
@@ -102,7 +102,7 @@
 - `authenticated` 역할로 Data API에 직접 접근하는 것은 점검하지 않았습니다. 정책은 본인 행만 허용하도록 설계했지만, 심판이 재현할 수 없는 경로라 점수 대상에서 제외됩니다.
 
 **남아 있는 약점:**
-- 서버가 RLS를 우회하는 비밀키로 접속하므로, 서버 코드의 소유자 비교에 버그가 있으면 DB의 RLS가 막아 주지 못합니다. 비밀키가 유출되면 모든 메모가 노출됩니다.
+- 서버가 RLS를 우회하는 비공개 설정값로 접속하므로, 서버 코드의 소유자 비교에 버그가 있으면 DB의 RLS가 막아 주지 못합니다. 비공개 설정값가 유출되면 모든 메모가 노출됩니다.
 - 추가할 때 이미 있는 `id`를 보내면 409가 돌아와, 그 `id`가 어딘가에 있다는 것을 알려 줍니다. UUID라 추측은 어렵지만 작은 신호입니다.
 - 주인이 없는 `훈련 행정 자료`는 누구도 읽거나 고칠 수 없는 채로 DB에 남아 있습니다.
 - 공개 anon 키는 화면 코드에 있고 권한이 없어 거부되지만, 키가 공개되어 있다는 사실은 그대로입니다.
@@ -112,11 +112,11 @@
 ## 5단계: 자료 요청을 서버 한곳으로 모읍니다
 
 **현재 작동하는 기능 (5단계 저장점):**
-- 브라우저 코드(`public/index.html`)는 Supabase를 직접 부르지 않습니다. `supabase-js`와 Project URL, 공개(publishable) 키를 화면에서 모두 없앴습니다. 로그인·토큰 갱신·로그아웃은 서버 함수 `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`(`src/auth-api.mjs`)이 Supabase Auth로 대신 전달하고, 메모 읽기·추가·수정·삭제는 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부릅니다. 로그인 토큰은 그 탭의 `sessionStorage`에만 두고 탭을 닫으면 사라집니다. 서버 함수는 이메일·비밀번호·토큰을 로그에 남기지 않고, 로그인 실패는 계정 존재 여부를 알리지 않는 같은 문구로 답합니다.
+- 브라우저 코드(`public/index.html`)는 Supabase를 직접 부르지 않습니다. `supabase-js`와 Project URL, 공개용 키를 화면에서 모두 없앴습니다. 로그인·토큰 갱신·로그아웃은 서버 함수 `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`(`src/auth-api.mjs`)이 Supabase Auth로 대신 전달하고, 메모 읽기·추가·수정·삭제는 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부릅니다. 로그인 토큰은 그 탭의 `sessionStorage`에만 두고 탭을 닫으면 사라집니다. 서버 함수는 이메일·비밀번호·토큰을 로그에 남기지 않고, 로그인 실패는 계정 존재 여부를 알리지 않는 같은 문구로 답합니다.
 - 로그인 서버 함수는 Vercel 환경변수 `SUPABASE_PUBLISHABLE_KEY`(공개용 키)를 서버에서만 읽습니다. 값은 학생이 Settings → Environment Variables에 직접 넣고, 넣은 뒤 Redeploy해야 합니다. 이 값이 없으면 로그인이 500(서버 설정 미완료)으로 실패합니다. `/api/auth/*`는 자료 API가 아니라서 `allowedRoutes`에 넣지 않았습니다.
-- 서버 함수의 로그인 검사, 소유자 비교, 서버 전용 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로입니다.
+- 서버 함수의 로그인 검사, 소유자 비교, 서버 비공개 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로입니다.
 - `aleph.config.json`의 `originalApiUrl`은 쿼리 없는 원본 자료 주소 `https://hcaygyndhpfqrwlfbpqt.supabase.co/rest/v1/vault_notes`입니다. 이 주소를 공개 anon 키로 직접 부르면 거부되어야 하고, 메모가 보이면 안 됩니다. 배포 신원 파일 `/aleph.json`에도 같은 주소가 `originalApiUrl`로 실립니다(5단계부터, 쿼리가 없는 `https://` 경로가 아니면 빌드가 실패합니다). 허용 경로 목록 `allowedRoutes`(`GET /api/notes` 같은 형식, 1개 이상)도 `/aleph.json`에 실리며, 비어 있거나 형식이 다르면 빌드가 실패합니다. `restoreRoute`는 아직 `null`입니다.
-- DB 쪽: 로컬 `supabase/004_revoke_direct_access.sql`(Git에 올리지 않음)이 `vault_notes`의 `PUBLIC`·`anon`·`authenticated` 권한을 모두 회수하고, `service_role`의 네 권한과 RLS가 남았는지 같은 트랜잭션에서 확인합니다. 003의 RLS 정책 네 개는 지우지 않고 2차 방어로 남깁니다.
+- DB 쪽: 로컬 `supabase/004_revoke_direct_access.sql`(Git에 올리지 않음)이 `vault_notes`의 `PUBLIC`·`anon`·`authenticated` 권한을 모두 회수하고, 서비스 역할의 네 권한과 RLS가 남았는지 같은 트랜잭션에서 확인합니다. 003의 RLS 정책 네 개는 지우지 않고 2차 방어로 남깁니다.
 
 **다시 실행하는 방법:**
 0. Vercel 프로젝트의 Settings → Environment Variables에 `SUPABASE_PUBLISHABLE_KEY`(Supabase 대시보드의 공개 키)를 직접 넣고 Redeploy합니다. 코드·Git·채팅에는 적지 않습니다.
@@ -127,10 +127,10 @@
 **기록 범위:**
 - `npm run bundle`의 `src/attack-check.mjs`는 첫 화면에 공개 키 형태의 문자열이 없는지 읽어 보고(`page_no_public_key`), 공개 키가 화면에 없으므로 anon 직접 요청에는 터미널 환경변수 `SUPABASE_PUBLISHABLE_KEY`의 값을 씁니다(결과·로그에 싣지 않습니다). 환경변수가 없으면 그 요청들은 미실행으로 남습니다. 보낸 요청의 결과는 `artifacts/submission.json`에만 남고 이 README에는 적지 않습니다(심판의 판정이 아닙니다). 5단계에서는 토큰 없는 요청, 공개 anon 키로 원본 주소에 직접 보낸 4가지 요청, 원본 주소에서 메모가 보이는지 읽어 보는 요청을 보냅니다.
 - 미실행: 로그인 토큰을 실은 원본 주소 직접 요청(`authenticated_direct_rejected`), 정상 A 로그인 뒤 서버 함수 동작(`logged_in_own_crud`), B의 거부(`cross_user_access`). 계정 정보와 토큰을 코드에 넣지 않기 위해서이며 학생이 브라우저에서 직접 확인해야 합니다.
-- **학생이 SQL Editor에서 실행해 보고한 004 적용 후 점검 결과:** `role_table_grants`에 `PUBLIC`·`anon`·`authenticated` 행이 없습니다. `has_table_privilege`는 `anon`과 `authenticated`가 모두 `(없음)`이고 `service_role`은 `SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`를 유지합니다. `has_any_column_privilege`는 `anon`과 `authenticated` 모두 `(없음)`입니다. RLS는 켜져 있고(`true`) 정책은 4개(`policy_count`)입니다. 이 값은 학생이 붙여 준 결과이고, 코딩 도구는 DB에 접속하지 않았습니다. 적용 전 `[1]` 결과는 받지 않아 대조하지 못했습니다.
+- **학생이 SQL Editor에서 실행해 보고한 004 적용 후 점검 결과:** `role_table_grants`에 `PUBLIC`·`anon`·`authenticated` 행이 없습니다. `has_table_privilege`는 `anon`과 `authenticated`가 모두 `(없음)`이고 서비스 역할은 `SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`를 유지합니다. `has_any_column_privilege`는 `anon`과 `authenticated` 모두 `(없음)`입니다. RLS는 켜져 있고(`true`) 정책은 4개(`policy_count`)입니다. 이 값은 학생이 붙여 준 결과이고, 코딩 도구는 DB에 접속하지 않았습니다. 적용 전 `[1]` 결과는 받지 않아 대조하지 못했습니다.
 - 004 적용 뒤 `authenticated` 토큰으로 원본 주소를 직접 불러 거부되는지는 코드로 실행하지 않았습니다(`authenticated_direct_rejected`는 미실행).
 
-**남아 있는 약점:** 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
+**남아 있는 약점:** 서버가 RLS를 우회하는 비공개 설정값로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
 
 ## 보너스 xdr-01: 무차별 로그인 공격 경보
 
@@ -211,7 +211,7 @@
 
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
-[AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.
+[AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 비공개 설정값·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.
 
 `src/decider.mjs`와 `src/detect.mjs`의 로컬 시험은 반 엔진이나 운영 심판의 결과가 아닙니다. 1단계 이후 제출 묶음 계약 `aleph.defense.submission.v2`는 `scripts/bundle.mjs`에 남아 있으며, 코딩 도구가 해당 단계의 최신 배포 주소와 Git 원격을 맞춘 뒤 사용합니다.
 

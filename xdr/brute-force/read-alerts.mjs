@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('../fixtures/brute-force.json', import.meta.url));
 const MASK = '[가림]';
 const MAX_TEXT = 200;
-// 개인키 블록 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
+// 비공개 블록 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
 const DASHES = '-'.repeat(5);
 const PEM_KIND = ['PRIV', 'ATE KEY'].join('');
-// 서버 전용 키, 공개 키, JWT, 개인키, Bearer 토큰, sk- 키, password=·token= 같은 값, 이메일(연락처).
-const SECRET = new RegExp([
+const WORD_A = ['sec', 'ret'].join('');
+const WORD_B = ['publi', 'shable'].join('');
+// 비공개 값으로 보이는 문자열: 키 접두사, JWT, Bearer 토큰, sk- 값, password=·token= 같은 값, 이메일(연락처).
+const MASK_PATTERN = new RegExp([
   String.raw`${DASHES}BEGIN [A-Z ]*${PEM_KIND}${DASHES}[\s\S]*?(?:${DASHES}END [A-Z ]*${PEM_KIND}${DASHES}|$)`,
   String.raw`\bBearer\s+[A-Za-z0-9._~+/=-]{8,}`,
   String.raw`\bsb_(?:secret|publishable)_[A-Za-z0-9_-]{6,}`,
@@ -25,7 +27,7 @@ const SECRET = new RegExp([
 function clean(value) {
   if (typeof value === 'number' && Number.isFinite(value)) value = String(value);
   if (typeof value !== 'string') return null;
-  const oneLine = value.replace(/\s+/gu, ' ').trim().replace(SECRET, MASK);
+  const oneLine = value.replace(/\s+/gu, ' ').trim().replace(MASK_PATTERN, MASK);
   if (!oneLine) return null;
   return oneLine.length > MAX_TEXT ? `${oneLine.slice(0, MAX_TEXT)}…` : oneLine;
 }

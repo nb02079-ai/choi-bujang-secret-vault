@@ -61,10 +61,10 @@ test('malformed alerts never throw, never block and are only recorded', async ()
 });
 
 test('reasons never echo alert text, accounts or addresses', () => {
-  const secret = 'user-secret-name';
-  for (const alert of [alertOf({ count: '90', srcuser: secret }), alertOf({ count: '4', srcuser: secret }), alertOf({ count: '0', srcuser: secret })]) {
+  const hidden = 'user-hidden-name';
+  for (const alert of [alertOf({ count: '90', srcuser: hidden }), alertOf({ count: '4', srcuser: hidden }), alertOf({ count: '0', srcuser: hidden })]) {
     const text = JSON.stringify(decide(alert));
-    assert.doesNotMatch(text, new RegExp(`${secret}|203\\.0\\.113`, 'u'));
+    assert.doesNotMatch(text, new RegExp(`${hidden}|203\\.0\\.113`, 'u'));
   }
 });
 

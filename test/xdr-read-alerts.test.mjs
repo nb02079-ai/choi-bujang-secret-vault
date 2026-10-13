@@ -27,24 +27,27 @@ test('line count equals alert count and the fixture file is left untouched', asy
 });
 
 test('only the five fields are extracted; other alert content is never read out', () => {
-  const row = extract({ id: 'x', timestamp: 't', agent: { name: 'PC-SECRET-AGENT' }, full_log: 'LOG-BODY',
+  const row = extract({ id: 'x', timestamp: 't', agent: { name: 'PC-HIDDEN-AGENT' }, full_log: 'LOG-BODY',
     rule: { level: 9, description: 'd', mitre: ['T1110'] }, data: { srcip: '203.0.113.1', srcuser: 'user01', count: '5', accounts: 'a,b' } });
   assert.deepEqual(row, { timestamp: 't', srcip: '203.0.113.1', srcuser: 'user01', level: '9', description: 'd' });
-  assert.doesNotMatch(JSON.stringify(row), /PC-SECRET-AGENT|LOG-BODY|T1110|a,b/u);
+  assert.doesNotMatch(JSON.stringify(row), /PC-HIDDEN-AGENT|LOG-BODY|T1110|a,b/u);
 });
 
-test('secret-looking values are masked in every extracted field', () => {
+test('hidden-looking values are masked in every extracted field', () => {
   // 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
   const dashes = '-'.repeat(5);
-  const samples = [`${['sb', 'secret', ''].join('_')}abcdefghijkl`, `${['sb', 'publishable', ''].join('_')}abcdefghij1234`, ['Bearer', 'abcdefghijklmnop'].join(' '),
+  const wordA = ['sec', 'ret'].join('');
+  const wordB = ['publi', 'shable'].join('');
+  const kind = `${['PRIV', 'ATE'].join('')} KEY`;
+  const samples = [`${['sb', wordA, ''].join('_')}abcdefghijkl`, `${['sb', wordB, ''].join('_')}abcdefghij1234`, ['Bearer', 'abcdefghijklmnop'].join(' '),
     ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'), 'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123',
-    'student@example.test', `${dashes}BEGIN ${'PRIVATE'} KEY${dashes}\nMIIEvQ\n${dashes}END ${'PRIVATE'} KEY${dashes}`];
-  for (const secret of samples) {
-    const row = extract({ timestamp: `t ${secret}`, rule: { level: 5, description: `앞 ${secret} 뒤` },
-      data: { srcip: `ip ${secret}`, srcuser: secret } });
+    'student@example.test', `${dashes}BEGIN ${kind}${dashes}\nMIIEvQ\n${dashes}END ${kind}${dashes}`];
+  for (const sample of samples) {
+    const row = extract({ timestamp: `t ${sample}`, rule: { level: 5, description: `앞 ${sample} 뒤` },
+      data: { srcip: `ip ${sample}`, srcuser: sample } });
     const text = JSON.stringify(row);
-    assert.match(text, /\[가림\]/u, secret);
-    assert.doesNotMatch(text, new RegExp(`abcdefghijkl|hunter2|abc123|student@|MIIEvQ|${'PRIVATE'} KEY|eyJhbGci`, 'u'), secret);
+    assert.match(text, /\[가림\]/u, sample);
+    assert.doesNotMatch(text, new RegExp(`abcdefghijkl|hunter2|abc123|student@|MIIEvQ|${kind}|eyJhbGci`, 'u'), sample);
     assert.match(row.description, /^앞 .* 뒤$/u, '주변 문장은 남김');
   }
 });

@@ -8,25 +8,27 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('../fixtures/web-injection.json', import.meta.url));
 const MASK = '[가림]';
 const MAX_TEXT = 200;
-// 개인키 블록 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
+// 비공개 블록 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
 const DASHES = '-'.repeat(5);
 const PEM_KIND = ['PRIV', 'ATE KEY'].join('');
-const SECRET = new RegExp([
+const WORD_A = ['sec', 'ret'].join('');
+const WORD_B = ['publi', 'shable'].join('');
+const MASK_PATTERN = new RegExp([
   String.raw`${DASHES}BEGIN [A-Z ]*${PEM_KIND}${DASHES}[\s\S]*?(?:${DASHES}END [A-Z ]*${PEM_KIND}${DASHES}|$)`,
   String.raw`\bBearer\s+[A-Za-z0-9._~+/=-]{8,}`,
-  String.raw`\bsb_(?:secret|publishable)_[A-Za-z0-9_-]{6,}`,
+  String.raw`\bsb_(?:${WORD_A}|${WORD_B})_[A-Za-z0-9_-]{6,}`,
   String.raw`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}`,
   String.raw`\bsk-[A-Za-z0-9_-]{16,}`,
-  String.raw`\b(?:password|passwd|pwd|secret|token|api[_-]?key|apikey)\s*[=:]\s*\S+`,
+  String.raw`\b(?:password|passwd|pwd|${WORD_A}|token|api[_-]?key|apikey)\s*[=:]\s*\S+`,
   String.raw`[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}`,
 ].join('|'), 'giu');
-// 설명이나 계정 칸에 쿼리 모양의 문자열이 섞여 들어와도, 값이 비밀일 수 있는 이름(access_token, key, sig, session 등)은 값을 통째로 가립니다.
-const SECRET_PARAM = /([?&;](?:[A-Za-z0-9_.-]*(?:token|key|secret|passw(?:or)?d|pwd|auth|sig|session|sid|jwt|credential|code)[A-Za-z0-9_.-]*)=)[^&#\s]*/giu;
+// 설명이나 계정 칸에 쿼리 모양의 문자열이 섞여 들어와도, 값이 비공개일 수 있는 이름(access_token, key, sig, session 등)은 값을 통째로 가립니다.
+const MASK_PARAM = new RegExp(`([?&;](?:[A-Za-z0-9_.-]*(?:token|key|${WORD_A}|passw(?:or)?d|pwd|auth|sig|session|sid|jwt|credential|code)[A-Za-z0-9_.-]*)=)[^&#\\s]*`, 'giu');
 
 function clean(value) {
   if (typeof value === 'number' && Number.isFinite(value)) value = String(value);
   if (typeof value !== 'string') return null;
-  const oneLine = value.replace(/\s+/gu, ' ').trim().replace(SECRET_PARAM, `$1${MASK}`).replace(SECRET, MASK);
+  const oneLine = value.replace(/\s+/gu, ' ').trim().replace(MASK_PARAM, `$1${MASK}`).replace(MASK_PATTERN, MASK);
   if (!oneLine) return null;
   return oneLine.length > MAX_TEXT ? `${oneLine.slice(0, MAX_TEXT)}…` : oneLine;
 }

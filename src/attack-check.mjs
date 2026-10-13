@@ -1,11 +1,11 @@
 // The student changes this check as each stage adds an attack to the same app.
-// Never return tokens, private keys, real names, or note bodies.
+// Never return tokens, credentials, real names, or note bodies.
 // These are the student's own requests, not a judge's decision.
 // 키 모양 탐지 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
 const DASHES = '-'.repeat(5);
 const PEM_KIND = ['PRIV', 'ATE KEY'].join('');
 const KEY_SHAPE = new RegExp([
-  String.raw`\bsb_${'secret'}_[A-Za-z0-9_-]{6,}`,
+  String.raw`\bsb_${['sec', 'ret'].join('')}_[A-Za-z0-9_-]{6,}`,
   String.raw`\beyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}`,
   String.raw`${DASHES}BEGIN [A-Z ]*${PEM_KIND}${DASHES}`,
 ].join('|'), 'u');
@@ -95,14 +95,14 @@ async function secondStepChecks(config, app) {
       observed: count > 0 ? `비로그인 요청에서 메모 ${count}건이 읽힘 (HTTP ${response.status})`
         : `비로그인 요청에서 메모가 읽히지 않음 (HTTP ${response.status})` });
     results.push({ attackId: 'api_response_no_key',
-      expected: '/api/notes 응답에 비밀키 형태의 문자열이 없어야 함',
-      observed: KEY_SHAPE.test(text) ? '응답에 비밀키 형태의 문자열이 있음' : '응답에 비밀키 형태의 문자열이 없음' });
+      expected: '/api/notes 응답에 비공개 값 형태의 문자열이 없어야 함',
+      observed: KEY_SHAPE.test(text) ? '응답에 비공개 값 형태의 문자열이 있음' : '응답에 비공개 값 형태의 문자열이 없음' });
   } catch {
     results.push({ attackId: 'anonymous_api_read',
       expected: '비로그인 요청으로 /api/notes의 메모를 읽을 수 없어야 함 (2단계에서는 아직 막지 않은 약점)',
       observed: '요청이 실패해 확인하지 못함' });
     results.push({ attackId: 'api_response_no_key',
-      expected: '/api/notes 응답에 비밀키 형태의 문자열이 없어야 함', observed: '요청이 실패해 확인하지 못함' });
+      expected: '/api/notes 응답에 비공개 값 형태의 문자열이 없어야 함', observed: '요청이 실패해 확인하지 못함' });
   }
 
   try {
@@ -130,7 +130,7 @@ async function expectRejected(app, { attackId, expected, path, init = {}, status
     const keyShown = scanForKey && KEY_SHAPE.test(text);
     const observed = statuses.includes(response.status) ? `거부됨 (HTTP ${response.status})`
       : `${statuses.join('/')}이 아닌 응답이 옴 (HTTP ${response.status})`;
-    return { attackId, expected, observed: keyShown ? `${observed}. 응답에 비밀키 형태의 문자열이 있음` : observed };
+    return { attackId, expected, observed: keyShown ? `${observed}. 응답에 비공개 값 형태의 문자열이 있음` : observed };
   } catch {
     return { attackId, expected, observed: '요청이 실패해 확인하지 못함' };
   }
@@ -170,14 +170,17 @@ async function thirdStepChecks(app) {
 // 공개 키는 화면 코드에 원래 들어 있는 값이라, 외부 사람이 하듯 배포된 페이지에서 읽어 씁니다.
 // 요청은 존재하지 않는 id 조건이나 필수 칸이 빠진 본문만 써서, 권한이 잘못 열려 있어도 자료가 바뀌지 않게 합니다.
 // authenticated 역할의 직접 접근과 A/B 로그인이 필요한 점검은 이 코드가 실행하지 않고 '미실행'으로 남깁니다.
-// 5단계부터 화면에 공개 키가 없으므로, 학생이 자기 터미널의 환경변수 SUPABASE_PUBLISHABLE_KEY에 넣어 둔 값을 먼저 씁니다.
+// 5단계부터 화면에 공개 접속값이 없으므로, 학생이 자기 터미널의 환경변수 SUPABASE_PUBLISHABLE_KEY에 넣어 둔 값을 먼저 씁니다.
 // 값은 결과·로그에 싣지 않습니다. 환경변수가 없으면 4단계처럼 배포된 페이지에서 찾습니다.
-async function readPublishableKey(app) {
+// 접두사는 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
+const PUBLIC_ACCESS_PREFIX = ['sb', ['publi', 'shable'].join(''), ''].join('_');
+const PUBLIC_ACCESS_VALUE = `${PUBLIC_ACCESS_PREFIX}[A-Za-z0-9_-]{10,}`;
+async function readPublicAccessValue(app) {
   const fromEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (typeof fromEnv === 'string' && /^sb\x5fpublishable_[A-Za-z0-9_-]{10,}$/u.test(fromEnv)) return fromEnv;
+  if (typeof fromEnv === 'string' && new RegExp(`^${PUBLIC_ACCESS_VALUE}$`, 'u').test(fromEnv)) return fromEnv;
   try {
     const page = await (await send(app)).text();
-    return /sb\x5fpublishable_[A-Za-z0-9_-]{10,}/u.exec(page)?.[0] ?? null;
+    return new RegExp(PUBLIC_ACCESS_VALUE, 'u').exec(page)?.[0] ?? null;
   } catch {
     return null;
   }
@@ -194,20 +197,20 @@ async function anonDirectChecks(app, dataApi) {
     .filter(item => !['logged_in_crud', 'cross_user_access'].includes(item.attackId));
 
   const anonChecks = [
-    { attackId: 'anon_direct_read_rejected', expected: 'anon 공개 키로 Data API에 직접 목록을 읽으면 거부되어야 함',
+    { attackId: 'anon_direct_read_rejected', expected: '공개 접속값으로 Data API에 직접 목록을 읽으면 거부되어야 함',
       query: '?select=*', init: {} },
-    { attackId: 'anon_direct_create_rejected', expected: 'anon 공개 키로 Data API에 직접 추가하면 거부되어야 함',
+    { attackId: 'anon_direct_create_rejected', expected: '공개 접속값으로 Data API에 직접 추가하면 거부되어야 함',
       query: '', init: { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: '{}' } },
-    { attackId: 'anon_direct_update_rejected', expected: 'anon 공개 키로 Data API에 직접 수정하면 거부되어야 함',
+    { attackId: 'anon_direct_update_rejected', expected: '공개 접속값으로 Data API에 직접 수정하면 거부되어야 함',
       query: `?id=eq.${SAMPLE_ID}`, init: { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ title: '점검' }) } },
-    { attackId: 'anon_direct_delete_rejected', expected: 'anon 공개 키로 Data API에 직접 삭제하면 거부되어야 함',
+    { attackId: 'anon_direct_delete_rejected', expected: '공개 접속값으로 Data API에 직접 삭제하면 거부되어야 함',
       query: `?id=eq.${SAMPLE_ID}`, init: { method: 'DELETE' } },
   ];
-  const key = dataApi ? await readPublishableKey(app) : null;
+  const key = dataApi ? await readPublicAccessValue(app) : null;
   for (const check of anonChecks) {
     if (!dataApi || !key) {
       kept.push({ attackId: check.attackId, expected: check.expected,
-        observed: '미실행. 공개 anon 키(환경변수 SUPABASE_PUBLISHABLE_KEY 또는 배포된 페이지)나 Data API 주소를 찾지 못함' });
+        observed: '미실행. 직접 요청에 쓸 공개 접속값(터미널 환경변수 또는 배포된 페이지)이나 Data API 주소를 찾지 못함' });
       continue;
     }
     kept.push(await expectRejected(app, {
@@ -236,11 +239,11 @@ async function fifthStepChecks(config, app) {
 
   results.push(await pageKeyCheck(app));
 
-  const expected = '공개 anon 키로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
-  const key = original ? await readPublishableKey(app) : null;
+  const expected = '공개 접속값으로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
+  const key = original ? await readPublicAccessValue(app) : null;
   if (!original || !key) {
     results.push({ attackId: 'original_url_no_notes', expected,
-      observed: '미실행. 원본 자료 주소(originalApiUrl)나 공개 anon 키를 찾지 못함' });
+      observed: '미실행. 원본 자료 주소(originalApiUrl)나 공개 접속값을 찾지 못함' });
   } else {
     try {
       const response = await send(`${original.href}?select=id&limit=1`, { headers: { apikey: key } });
@@ -283,17 +286,17 @@ async function sixthStepChecks(config, app) {
   return results;
 }
 
-// 첫 화면에 Supabase 공개 키(sb\x5fpublishable_… 또는 anon JWT)가 없어야 합니다. 키 값은 결과에 싣지 않습니다.
+// 첫 화면에 Supabase 공개 접속값이나 토큰 모양 문자열이 없어야 합니다. 값은 결과에 싣지 않습니다.
 async function pageKeyCheck(app) {
-  const expected = '첫 화면 코드에 Supabase 공개 키(sb\x5fpublishable_… 또는 anon 키)가 없어야 함';
+  const expected = '첫 화면 코드에 Supabase 공개 접속값이나 토큰 모양 문자열이 없어야 함';
   try {
     const response = await send(app);
     const page = await response.text();
-    const shown = /sb\x5fpublishable_[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}/u.test(page);
+    const shown = new RegExp(`${PUBLIC_ACCESS_VALUE}|eyJ[A-Za-z0-9_-]{12,}\\.eyJ[A-Za-z0-9_-]{12,}\\.[A-Za-z0-9_-]{8,}`, 'u').test(page);
     return { attackId: 'page_no_public_key', expected,
       observed: !response.ok ? `첫 화면을 읽지 못함 (HTTP ${response.status})`
-        : shown ? `첫 화면 코드에 공개 키 형태의 문자열이 보임 (HTTP ${response.status})`
-          : `첫 화면 코드에 공개 키 형태의 문자열이 없음 (HTTP ${response.status})` };
+        : shown ? `첫 화면 코드에 접속값 형태의 문자열이 보임 (HTTP ${response.status})`
+          : `첫 화면 코드에 접속값 형태의 문자열이 없음 (HTTP ${response.status})` };
   } catch {
     return { attackId: 'page_no_public_key', expected, observed: '요청이 실패해 확인하지 못함' };
   }

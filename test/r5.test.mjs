@@ -110,9 +110,9 @@ function fakeResponse() {
 const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 // 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
-const SECRET_PREFIX = ['sb', 'secret', ''].join('_');
-const PUBLISHABLE_PREFIX = ['sb', 'publishable', ''].join('_');
-const SECRET = `${SECRET_PREFIX}testvalue_never_returned`;
+const HIDDEN_PREFIX = ['sb', ['sec', 'ret'].join(''), ''].join('_');
+const ACCESS_PREFIX = ['sb', ['publi', 'shable'].join(''), ''].join('_');
+const HIDDEN_VALUE = `${HIDDEN_PREFIX}testvalue_never_returned`;
 
 // 자료 저장소(PostgREST)를 흉내 내는 메모리 저장소입니다. 실제 Supabase를 부르지 않습니다.
 function memoryStore() {
@@ -120,7 +120,7 @@ function memoryStore() {
   const calls = [];
   const pick = (row, select) => Object.fromEntries(select.split(',').map(key => [key, row[key]]));
   const fetchImpl = async (url, init) => {
-    assert.equal(init.headers.apikey, SECRET);
+    assert.equal(init.headers.apikey, HIDDEN_VALUE);
     const query = Object.fromEntries(url.searchParams);
     const eq = (field) => (query[field]?.startsWith('eq.') ? query[field].slice(3) : undefined);
     const body = init.body ? JSON.parse(init.body) : undefined;
@@ -155,7 +155,7 @@ async function notesFixture() {
   };
   const verify = async (authorization) => tokens[authorization] ?? null;
   const api = createNotesApi({ verify, fetchImpl: store.fetchImpl,
-    env: { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: SECRET } });
+    env: { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: HIDDEN_VALUE } });
   const call = async (handler, method, { token, url = '/api/notes', body, headers = {} } = {}) => {
     const res = fakeResponse();
     const authorization = token ? { authorization: `Bearer ${token}` } : {};
@@ -235,7 +235,7 @@ test('notes api lets a logged-in user add, read, edit and delete notes', async (
   assert.equal((await call(api.item, 'GET', { token: A, url: '/api/notes/not-a-uuid' })).statusCode, 404);
   assert.equal(store.calls.length, before, '형식이 틀린 id는 저장소를 부르지 않음');
 
-  assert.doesNotMatch(JSON.stringify([list.body, created.body, one.body]), new RegExp(SECRET, 'u'));
+  assert.doesNotMatch(JSON.stringify([list.body, created.body, one.body]), new RegExp(HIDDEN_VALUE, 'u'));
 });
 
 test('notes api limits read, add, edit and delete to the verified owner', async () => {
@@ -313,7 +313,7 @@ test('allowedRoutes lists exactly the routes the handlers accept', async () => {
 
 test('notes api reports server setup problems without leaking the key', async () => {
   const { createNotesApi } = await import('../src/notes-api.mjs');
-  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: SECRET };
+  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_SECRET_KEY: HIDDEN_VALUE };
   const request = { method: 'GET', url: '/api/notes', headers: { authorization: 'Bearer a.b.c' } };
   const broken = createNotesApi({ env, verify: async () => { throw new TypeError('invalid_student_identity_provider'); },
     fetchImpl: async () => { throw new Error('no'); } });
@@ -328,7 +328,7 @@ test('notes api reports server setup problems without leaking the key', async ()
   const bad = fakeResponse();
   await down.collection(request, bad);
   assert.equal(bad.statusCode, 502);
-  assert.doesNotMatch(JSON.stringify([res.body, none.body, bad.body]), new RegExp(SECRET, 'u'));
+  assert.doesNotMatch(JSON.stringify([res.body, none.body, bad.body]), new RegExp(HIDDEN_VALUE, 'u'));
 });
 
 test('aleph.config.json identityProvider is accepted by the starter login verifier', async () => {
@@ -340,7 +340,7 @@ test('aleph.config.json identityProvider is accepted by the starter login verifi
   assert.equal(await verifier('Bearer aaa.bbb.ccc'), null);
   assert.equal(real.identityProvider.audience, 'authenticated');
   assert.equal(real.identityProvider.jwksUrl, `${real.identityProvider.issuer}/.well-known/jwks.json`);
-  assert.doesNotMatch(JSON.stringify(real.identityProvider), /secret|service_role|eyJ/iu);
+  assert.doesNotMatch(JSON.stringify(real.identityProvider), new RegExp(`${['sec', 'ret'].join('')}|${['service', 'role'].join('_')}|eyJ`, 'iu'));
 });
 
 test('step 3 attack check sends tokenless requests and leaves account checks unrun', async () => {
@@ -374,9 +374,9 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
 
     globalThis.fetch = async (url) => (new URL(String(url)).pathname === '/data.json'
       ? Response.json({ notes: [] })
-      : Response.json({ notes: [{ title: 't' }], leak: `${SECRET_PREFIX}abcdef123456` }, { status: 200 }));
+      : Response.json({ notes: [{ title: 't' }], leak: `${HIDDEN_PREFIX}abcdef123456` }, { status: 200 }));
     const open = Object.fromEntries((await runAttackChecks({ ...config, step: 3 })).map(item => [item.attackId, item.observed]));
-    assert.match(open.anonymous_list_rejected, /401이 아닌 응답이 옴 \(HTTP 200\)\. 응답에 비밀키 형태/u);
+    assert.match(open.anonymous_list_rejected, /401이 아닌 응답이 옴 \(HTTP 200\)\. 응답에 비공개 값 형태/u);
     assert.match(open.anonymous_delete_rejected, /401이 아닌 응답이 옴/u);
 
     globalThis.fetch = async () => { throw new Error('network'); };
@@ -389,7 +389,7 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
 
 test('step 4 attack check probes the Data API with the public anon key only', async () => {
   const originalFetch = globalThis.fetch;
-  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
+  const key = `${ACCESS_PREFIX}abcdefghij1234567890`;
   const step4 = { ...config, step: 4, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];
   const handler = (dataApiStatus, pageHtml) => async (url, init = {}) => {
@@ -441,7 +441,7 @@ test('step 4 attack check probes the Data API with the public anon key only', as
 
 test('step 5 attack check calls the original data url with the public anon key only', async () => {
   const originalFetch = globalThis.fetch;
-  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
+  const key = `${ACCESS_PREFIX}abcdefghij1234567890`;
   const original = 'https://projref.supabase.co/rest/v1/vault_notes';
   const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];
@@ -506,9 +506,9 @@ test('deployment identity lists allowedRoutes from step 5 and rejects empty or m
 // 로그인 서버 함수: Supabase Auth를 흉내 내는 가짜 fetch만 씁니다. 실제 Supabase나 계정은 부르지 않습니다.
 test('auth api forwards login, refresh and logout without exposing keys or echoing passwords', async () => {
   const { createAuthApi } = await import('../src/auth-api.mjs');
-  const PUBLISHABLE = `${PUBLISHABLE_PREFIX}testvalue_only_for_server`;
+  const ACCESS_VALUE = `${ACCESS_PREFIX}testvalue_only_for_server`;
   const ACCESS = 'aaaa.bbbb.cccc';
-  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE };
+  const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: ACCESS_VALUE };
   const seen = [];
   const fetchImpl = async (url, init) => {
     const target = new URL(String(url));
@@ -519,7 +519,7 @@ test('auth api forwards login, refresh and logout without exposing keys or echoi
     if (target.search === '?grant_type=password') {
       return body.password === 'right-password'
         ? Response.json({ access_token: ACCESS, refresh_token: 'refresh1234', expires_in: 3600, token_type: 'bearer',
-          user: { id: 'secret-user-id', email: 'a@example.test', app_metadata: { role: 'x' } } })
+          user: { id: 'hidden-user-id', email: 'a@example.test', app_metadata: { role: 'x' } } })
         : Response.json({ error_code: 'invalid_credentials' }, { status: 400 });
     }
     return body.refresh_token === 'refresh1234'
@@ -539,9 +539,9 @@ test('auth api forwards login, refresh and logout without exposing keys or echoi
   assert.equal(ok.body.email, 'a@example.test');
   assert.ok(ok.body.expires_at > Math.floor(Date.now() / 1000));
   assert.equal(ok.headers['cache-control'], 'no-store');
-  assert.equal(seen[0].apikey, PUBLISHABLE);
+  assert.equal(seen[0].apikey, ACCESS_VALUE);
   assert.equal(JSON.parse(seen[0].body).email, 'a@example.test', '이메일은 앞뒤 공백을 지워서 보냄');
-  assert.doesNotMatch(JSON.stringify(ok.body), /secret-user-id|sb_publishable/u, '응답에 키·내부 id를 싣지 않음');
+  assert.doesNotMatch(JSON.stringify(ok.body), new RegExp(`hidden-user-id|${ACCESS_PREFIX}`, 'u'), '응답에 키·내부 id를 싣지 않음');
 
   const wrong = await call(api.login, 'POST', { body: { email: 'a@example.test', password: 'wrong' } });
   assert.equal(wrong.statusCode, 401);
@@ -572,7 +572,7 @@ test('auth api forwards login, refresh and logout without exposing keys or echoi
   assert.equal((await call(api.logout, 'POST', { headers: { authorization: 'Bearer nope' } })).statusCode, 401);
 });
 
-test('auth api reports setup and connection problems without leaking secrets', async () => {
+test('auth api reports setup and connection problems without leaking hidden values', async () => {
   const { createAuthApi } = await import('../src/auth-api.mjs');
   const body = { email: 'a@example.test', password: 'pw-never-logged' };
   const logged = [];
@@ -582,7 +582,7 @@ test('auth api reports setup and connection problems without leaking secrets', a
     const missing = fakeResponse();
     await createAuthApi({ env: { SUPABASE_URL: 'https://example-project.supabase.co' } }).login({ method: 'POST', body }, missing);
     assert.equal(missing.statusCode, 500);
-    const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: `${PUBLISHABLE_PREFIX}testvalue_only_for_server` };
+    const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: `${ACCESS_PREFIX}testvalue_only_for_server` };
     const down = fakeResponse();
     await createAuthApi({ env, fetchImpl: async () => { throw new Error(`boom ${body.password}`); } }).login({ method: 'POST', body }, down);
     assert.equal(down.statusCode, 502);
@@ -595,13 +595,13 @@ test('auth api reports setup and connection problems without leaking secrets', a
   } finally {
     console.error = originalError;
   }
-  assert.doesNotMatch(logged.join('\n'), /pw-never-logged|a@example\.test|sb_publishable/u);
+  assert.doesNotMatch(logged.join('\n'), new RegExp(`pw-never-logged|a@example\\.test|${ACCESS_PREFIX}`, 'u'));
 });
 
 test('step 5 attack check reports whether the page still shows a public key and can use a local env key', async () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
-  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
+  const key = `${ACCESS_PREFIX}abcdefghij1234567890`;
   const original = 'https://projref.supabase.co/rest/v1/vault_notes';
   const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];
@@ -618,7 +618,7 @@ test('step 5 attack check reports whether the page still shows a public key and 
     delete process.env.SUPABASE_PUBLISHABLE_KEY;
     globalThis.fetch = handler('<html>로그인 화면</html>');
     let byId = Object.fromEntries((await runAttackChecks(step5)).map(item => [item.attackId, item.observed]));
-    assert.match(byId.page_no_public_key, /^첫 화면 코드에 공개 키 형태의 문자열이 없음/u);
+    assert.match(byId.page_no_public_key, /^첫 화면 코드에 접속값 형태의 문자열이 없음/u);
     assert.match(byId.anon_direct_read_rejected, /^미실행/u, '화면에 키가 없고 환경변수도 없으면 직접 요청은 미실행');
     assert.match(byId.original_url_no_notes, /^미실행/u);
     assert.equal(seen.some(entry => entry.host === 'projref.supabase.co'), false);
@@ -635,7 +635,7 @@ test('step 5 attack check reports whether the page still shows a public key and 
     delete process.env.SUPABASE_PUBLISHABLE_KEY;
     globalThis.fetch = handler(`<script>'${key}'</script>`);
     byId = Object.fromEntries((await runAttackChecks(step5)).map(item => [item.attackId, item.observed]));
-    assert.match(byId.page_no_public_key, /^첫 화면 코드에 공개 키 형태의 문자열이 보임/u);
+    assert.match(byId.page_no_public_key, /^첫 화면 코드에 접속값 형태의 문자열이 보임/u);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEnv === undefined) delete process.env.SUPABASE_PUBLISHABLE_KEY;

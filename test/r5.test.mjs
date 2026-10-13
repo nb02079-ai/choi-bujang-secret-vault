@@ -109,7 +109,9 @@ function fakeResponse() {
 
 const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-const SECRET = 'sb\x5fsecret_testvalue_never_returned';
+// 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
+const SECRET_PREFIX = ['sb', 'secret', ''].join('_');
+const SECRET = `${SECRET_PREFIX}testvalue_never_returned`;
 
 // 자료 저장소(PostgREST)를 흉내 내는 메모리 저장소입니다. 실제 Supabase를 부르지 않습니다.
 function memoryStore() {
@@ -371,7 +373,7 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
 
     globalThis.fetch = async (url) => (new URL(String(url)).pathname === '/data.json'
       ? Response.json({ notes: [] })
-      : Response.json({ notes: [{ title: 't' }], leak: 'sb\x5fsecret_abcdef123456' }, { status: 200 }));
+      : Response.json({ notes: [{ title: 't' }], leak: `${SECRET_PREFIX}abcdef123456` }, { status: 200 }));
     const open = Object.fromEntries((await runAttackChecks({ ...config, step: 3 })).map(item => [item.attackId, item.observed]));
     assert.match(open.anonymous_list_rejected, /401이 아닌 응답이 옴 \(HTTP 200\)\. 응답에 비밀키 형태/u);
     assert.match(open.anonymous_delete_rejected, /401이 아닌 응답이 옴/u);

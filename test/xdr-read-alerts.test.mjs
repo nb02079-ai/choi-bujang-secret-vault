@@ -34,9 +34,11 @@ test('only the five fields are extracted; other alert content is never read out'
 });
 
 test('secret-looking values are masked in every extracted field', () => {
-  const samples = ['sb\x5fsecret_abcdefghijkl', 'sb\x5fpublishable_abcdefghij1234', 'Bearer abcdefghijklmnop',
-    'ey\x4ahbGciOiJIUzI1.eyJzdWIiOiIxMjM0.abcdEFGH', 'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123',
-    'student@example.test', ['\x2d----BEGIN PRIV' + 'ATE KEY-----', 'MIIEvQ', '\x2d----END PRIV' + 'ATE KEY-----'].join('\n')];
+  // 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
+  const dashes = '-'.repeat(5);
+  const samples = [`${['sb', 'secret', ''].join('_')}abcdefghijkl`, 'sb\x5fpublishable_abcdefghij1234', ['Bearer', 'abcdefghijklmnop'].join(' '),
+    ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'), 'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123',
+    'student@example.test', `${dashes}BEGIN ${'PRIVATE'} KEY${dashes}\nMIIEvQ\n${dashes}END ${'PRIVATE'} KEY${dashes}`];
   for (const secret of samples) {
     const row = extract({ timestamp: `t ${secret}`, rule: { level: 5, description: `앞 ${secret} 뒤` },
       data: { srcip: `ip ${secret}`, srcuser: secret } });

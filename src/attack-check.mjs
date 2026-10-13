@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 // These are the student's own requests, not a judge's decision.
@@ -30,7 +32,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -39,7 +41,8 @@ export async function runAttackChecks(config) {
   if (config.step === 2) return secondStepChecks(config, app);
   if (config.step === 3) return thirdStepChecks(app);
   if (config.step === 4) return fourthStepChecks(config, app);
-  return fifthStepChecks(config, app);
+  if (config.step === 5) return fifthStepChecks(config, app);
+  return sixthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -252,6 +255,26 @@ async function fifthStepChecks(config, app) {
     observed: '미실행. 로그인 토큰을 코드에 넣지 않으므로 이 코드는 실행하지 않음' });
   results.push({ attackId: 'logged_in_own_crud', expected: '정상 A 로그인 뒤에는 서버 함수로 자기 메모를 읽고 추가·수정·삭제할 수 있어야 함',
     observed: '미실행. 계정 정보를 코드에 넣지 않으므로 브라우저에서 학생이 직접 확인함' });
+  return results;
+}
+
+// 6단계: 등록한 기기만 자료실에 들어옵니다. 5단계 점검을 그대로 두고, 판정기(src/decider.mjs)에 가상 요청 두 건을 직접 넣어
+// 본 결과를 더합니다. 이는 네트워크 요청이 아닌 로컬 연습이며 미등록 기기 공격은 심판이 맡습니다.
+async function sixthStepChecks(config, app) {
+  const results = await fifthStepChecks(config, app);
+  const expected = '등록 기기의 가상 요청은 allow, 미등록 기기의 가상 요청은 deny·device_not_registered여야 함';
+  try {
+    const { decide } = await import('./decider.mjs');
+    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', route: 'GET /notes/:id' };
+    const registered = await decide({ ...base, requestId: randomUUID(), deviceRegistered: true });
+    const unregistered = await decide({ ...base, requestId: randomUUID(), deviceRegistered: false });
+    const ok = registered.decision === 'allow'
+      && unregistered.decision === 'deny' && unregistered.reasonCode === 'device_not_registered';
+    results.push({ attackId: 'device_registered_local', expected,
+      observed: `로컬 가상 요청 연습: 등록 ${registered.decision}, 미등록 ${unregistered.decision}·${unregistered.reasonCode} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님` });
+  } catch {
+    results.push({ attackId: 'device_registered_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
+  }
   return results;
 }
 

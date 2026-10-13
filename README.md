@@ -132,6 +132,34 @@
 
 **남아 있는 약점:** 서버가 RLS를 우회하는 비밀키로 접속하므로 서버의 소유자 비교가 유일한 1차 방어이고, 2단계의 과거 노출은 해소되지 않았습니다. 화면에서 공개 키는 없앴지만 로그인 토큰(access·refresh)은 `sessionStorage`에 있어 화면에 스크립트가 주입되면 읽힐 수 있습니다. 로그인 요청에 시도 횟수 제한이 없고(Supabase Auth 쪽 제한에 의존), 옛 커밋 기록에는 공개 키가 남아 있습니다. 로그인 서버 함수와 새 화면 코드는 가짜 fetch 시험과 문법 검사만 했고, 실제 Supabase로 로그인해 본 것이 아닙니다.
 
+## 6단계: 등록한 기기만 자료실에 들어옵니다
+
+**현재 작동하는 기능:**
+- `src/decider.mjs`의 `decide(request)`에 규칙 `device_registered` 하나가 있습니다. 요청의 `deviceRegistered`가 정확히 `true`일 때만 `allow`(이유 코드 `approved`)를 반환합니다. `false`, 값 없음, `null`, 그 밖의 값은 모두 `deny`와 `device_not_registered`로 거부합니다. 응답은 계약의 5개 항목만 담고 `ruleIds`는 `['device_registered']`입니다.
+- 이 규칙은 요청에 담긴 `deviceRegistered`만 판단합니다. 사용자 번호, 역할, 기기 키는 읽지 않습니다. 기존 자료실 주소와 브라우저 화면은 바꾸지 않았습니다.
+- `RULE_IDS`는 `['device_registered']` 하나입니다. 시작 틀의 `starter.deny`는 뺐습니다. `aleph.config.json`의 `step`은 `6`이고, `src/attack-check.mjs`는 5단계 점검에 로컬 가상 요청 연습(`device_registered_local`)을 더합니다. 이 연습은 네트워크 요청이 아닙니다.
+- 이번 단계에는 따로 설치할 프로그램이 없습니다. 인증서, CA, 서명 키도 만들지 않았습니다.
+
+**확인하는 순서:**
+1. 저장소 폴더에서 `npm run decider:test`를 실행합니다.
+2. 출력에 `통과 · 등록 기기의 정상 요청`과 `통과 · 미등록 기기의 가상 요청`이 모두 있는지 봅니다. `확인 필요`가 한 줄이라도 있으면 실패입니다.
+3. 이 시험은 통과 여부만 출력합니다. 미등록 기기의 응답이 `deny`·`device_not_registered`인지 직접 보려면 시험 요청에 `deviceRegistered: false`를 넣어 `decide()`를 부른 응답의 `decision`과 `reasonCode`를 읽습니다.
+
+**정상 결과와 거부되어야 할 결과:**
+
+| 요청 | 기대 응답 |
+|---|---|
+| `deviceRegistered: true`인 정상 요청 | `allow` · `approved` · `device_registered` |
+| `deviceRegistered: false`인 요청 | `deny` · `device_not_registered` · `device_registered` |
+| `deviceRegistered`가 없거나 `null`, 문자열 `"true"`인 요청 | `deny` · `device_not_registered` |
+
+**실제로 실행한 결과 (2026-10-13, 학생의 자기 점검이며 심판의 판정이 아님):** `npm run decider:test`는 두 줄 모두 `통과`였습니다. 같은 가상 요청의 응답은 등록 기기가 `allow`·`approved`, 미등록 기기가 `deny`·`device_not_registered`였습니다. `npm run test:r5`는 18건이 모두 통과했습니다.
+
+**아직 확인하지 못한 것:**
+- 미등록 기기로 접속을 시도하는 공격은 심판이 맡습니다. 이 저장소의 로컬 시험은 가상 요청 연습이며 심판 통과나 실제 접속 차단의 증거가 아닙니다.
+- 이유 코드 `device_not_registered`가 운영 등록부의 `allowedReasonCodes`에 있는지는 확인하지 못했습니다. 등록부는 이 저장소에 없고 운영 측이 가집니다.
+- 규칙이 요청의 `method`를 보지 않아 읽기 이외의 요청도 등록 기기이면 허용합니다. 허용 경로는 `allowedRoutes`와 엔진의 경로 검사가 맡습니다.
+
 ## 보너스 xdr-01: 무차별 로그인 공격 경보
 
 수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/brute-force.json`(가상 28건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, 3~5단계 자료실과 `src/decider.mjs`는 건드리지 않았습니다.
@@ -159,7 +187,7 @@
 
 **아직 연결되지 않았거나 확인하지 못한 것:**
 - 판정 요청(`aleph.decision.v1`)에는 주소 필드가 없어, `withBruteForceDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `bruteforce_blocked`의 등록 여부는 확인하지 않았습니다.
-- `src/decider.mjs`는 시작 틀 그대로이고 `RULE_IDS`에 `xdr.bruteforce.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- `src/decider.mjs`의 `RULE_IDS`에 `xdr.bruteforce.deny`를 넣지 않았습니다(6단계 이후 `device_registered`만 있습니다). 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
 - `bf-11`, `bf-12`, `bf-17`처럼 실패 뒤 성공한 경보는 애매한 사례로 `alert`에 뒀습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
 
 ## 보너스 xdr-02: 웹 주입 경보
@@ -190,7 +218,7 @@
 
 **아직 연결되지 않았거나 확인하지 못한 것:**
 - 판정 요청(`aleph.decision.v1`)에는 주소 필드가 없어, `withWebInjectionDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `webinjection_blocked`의 등록 여부는 확인하지 않았습니다(등록부는 이 저장소에 없고 운영 측이 가집니다. 확인 방법은 `docs/DECIDER_REQUEST.md`의 "구현 전 확인" 2번을 따릅니다).
-- `src/decider.mjs`는 시작 틀 그대로이고 `RULE_IDS`에 `xdr.webinjection.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- `src/decider.mjs`의 `RULE_IDS`에 `xdr.webinjection.deny`를 넣지 않았습니다(6단계 이후 `device_registered`만 있습니다). 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
 - 수업 경보의 `data.url`에는 실제 공격 문자열 대신 문서용 표식(`doc-sql-…` 등)이 있어 표식과 실제 공격 모양을 둘 다 찾습니다. 한 번뿐인 의심 표기는 URL에 단서가 없어 설명 문구(따옴표, 구분 문자 등)와 Wazuh 규칙 수준에 의존하므로, 설명이나 수준이 바뀌면 놓칠 수 있습니다. 심판 정답표는 볼 수 없어서, 수준 4~9를 모두 알림으로 보는 것은 심판의 `X02_AMBIGUOUS_NOT_ALERT`·`X02_RECORD_MISMATCH` 안내를 보고 세운 추정이며 재제출로 확인해야 합니다.
 - 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
 

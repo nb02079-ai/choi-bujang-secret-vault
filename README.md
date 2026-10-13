@@ -159,7 +159,7 @@
 
 **아직 연결되지 않았거나 확인하지 못한 것:**
 - 판정 요청(`aleph.decision.v1`)에는 주소 필드가 없어, `withBruteForceDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `bruteforce_blocked`의 등록 여부는 확인하지 않았습니다.
-- `src/decider.mjs`는 시작 틀 그대로이고 `RULE_IDS`에 `xdr.bruteforce.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- `src/decider.mjs`에는 xdr 연결이 없고 `RULE_IDS`에 `xdr.bruteforce.deny`를 넣지 않았습니다(이 절을 쓴 10월 8일에는 시작 틀 그대로였고, 이후 6~7단계 규칙만 더했습니다). 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
 - `bf-11`, `bf-12`, `bf-17`처럼 실패 뒤 성공한 경보는 애매한 사례로 `alert`에 뒀습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
 
 ## 보너스 xdr-02: 웹 주입 경보
@@ -190,7 +190,7 @@
 
 **아직 연결되지 않았거나 확인하지 못한 것:**
 - 판정 요청(`aleph.decision.v1`)에는 주소 필드가 없어, `withWebInjectionDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `webinjection_blocked`의 등록 여부는 확인하지 않았습니다(등록부는 이 저장소에 없고 운영 측이 가집니다. 확인 방법은 `docs/DECIDER_REQUEST.md`의 "구현 전 확인" 2번을 따릅니다).
-- `src/decider.mjs`는 시작 틀 그대로이고 `RULE_IDS`에 `xdr.webinjection.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- `src/decider.mjs`에는 xdr 연결이 없고 `RULE_IDS`에 `xdr.webinjection.deny`를 넣지 않았습니다(이 절을 쓴 10월 8일에는 시작 틀 그대로였고, 이후 6~7단계 규칙만 더했습니다). 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
 - 수업 경보의 `data.url`에는 실제 공격 문자열 대신 문서용 표식(`doc-sql-…` 등)이 있어 표식과 실제 공격 모양을 둘 다 찾습니다. 한 번뿐인 의심 표기는 URL에 단서가 없어 설명 문구(따옴표, 구분 문자 등)와 Wazuh 규칙 수준에 의존하므로, 설명이나 수준이 바뀌면 놓칠 수 있습니다. 심판 정답표는 볼 수 없어서, 수준 4~9를 모두 알림으로 보는 것은 심판의 `X02_AMBIGUOUS_NOT_ALERT`·`X02_RECORD_MISMATCH` 안내를 보고 세운 추정이며 재제출로 확인해야 합니다.
 - 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
 
@@ -208,6 +208,26 @@
 5. 전체 로컬 시험은 `node --test test/*.test.mjs`입니다.
 
 **기록 범위:** 위 두 건은 가상 요청으로 하는 로컬 연습이며 심판 통과 증거가 아닙니다. 미등록 기기 공격에 대한 판정은 심판이 맡습니다. 이유 코드 `device_not_registered`가 운영 등록부(`allowedReasonCodes`)에 있는지는 이 저장소에서 확인하지 못했습니다.
+
+## 7단계: 평소와 다른 접속은 다시 확인합니다
+
+**현재 작동하는 기능 (판정기 규칙 하나 추가, 6단계 기기 규칙 유지):**
+- 입력 검사: `readSignals(request)`는 엔진이 넘긴 `signals`와 `recentEvents`만 읽습니다. `signals.source`가 `judge_fixture`일 때만 지역·네트워크·시각을 받고, `none`이거나 값이 없거나 알 수 없는 출처이면 모두 `null`(알 수 없음)입니다. 정상값으로 채우지 않습니다. 형식이 틀린 항목만 `null`이고, 빈 `recentEvents`는 "사건 없음"으로 구분합니다. `headers`, `geo`, 최상위 `region` 같은 계약 밖 이름은 읽지 않으므로 위조한 클라이언트 값이 접속 정보로 올라가지 않습니다.
+- 규칙 `step_up_required`: 시각이 0~5시, 네트워크가 `unusual`, 5분 안의 `risk_signal` 사건 횟수 합이 10 이상, 이 세 조건이 모두 참일 때만 `step_up`(이유 코드 `step_up_required`)입니다. 하나라도 알 수 없으면 작동하지 않습니다. 지역은 단독 근거가 아니며 `deny`로 이어지지 않습니다. 세 조건이 참일 때 `explainStepUp(request)`가 사유 목록(`odd_hour`, `unseen_network`, `burst_read`, 보조 `region_unusual`)을 돌려줍니다.
+- 재확인: 엔진이 넘긴 `stepUp.verified === true`이고 `authAgeSeconds`가 0~900 정수이면 `allow`, 아니면 다시 `step_up`입니다.
+- 판정 순서: 기기 미등록 `deny`(`device_not_registered`) → 복합 이상 `step_up` → 그 밖에는 `allow`. 응답은 계약의 다섯 항목 그대로입니다.
+
+**확인 순서:**
+1. `npm run fixture:7`: `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
+2. `npm run decider:test`: 4줄이 모두 `통과`여야 합니다. 복합 이상 접속은 `step_up`, 다시 확인한 복합 이상 접속과 정상 요청은 `allow`, 미등록 기기는 `deny`가 기대 결과입니다.
+3. 전체 로컬 시험은 `node --test test/*.test.mjs`입니다.
+
+**기록 범위:**
+- 위 확인은 모두 가상 요청으로 하는 로컬 연습이며 심판 판정이나 실제 접속 증거가 아닙니다. `npm run bundle`의 `step_up_required_local` 점검도 같은 성격입니다.
+- 새벽 0~5시와 5분 안 10회라는 기준은 이 수업 원고에서 확인하지 못해 제가 정한 가정입니다. 상수는 `src/decider.mjs` 맨 위에 있습니다.
+- 현재 실제 경로의 `signals.source`는 `none`이므로 실제 접속에서는 이 규칙이 작동하지 않고 기기 규칙만 적용됩니다.
+- **미실행:** 제공 엔진이 같은 내 로그인으로 다시 로그인한 시각을 검증하는 계약을 이 저장소에서 찾지 못했습니다(`docs/DECIDER_REQUEST.md`에는 `stepUp` 값의 형식만 있습니다). 그래서 다시 로그인 전 실제 자료 차단, 재로그인 확인, 새 로그인 뒤 요청 허용은 실행하지 않았습니다(`relogin_block_live`는 미실행). 토큰 원문은 어디에도 기록하지 않았습니다.
+- 이유 코드 `step_up_required`가 운영 등록부(`allowedReasonCodes`)에 있는지 확인하지 못했습니다.
 
 ## 다음 단계의 코딩 도구에 전달할 규칙
 

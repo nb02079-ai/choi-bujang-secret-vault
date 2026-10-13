@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -47,7 +47,8 @@ export async function runAttackChecks(config) {
   if (config.step === 3) return thirdStepChecks(app);
   if (config.step === 4) return fourthStepChecks(config, app);
   if (config.step === 5) return fifthStepChecks(config, app);
-  return sixthStepChecks(config, app);
+  if (config.step === 6) return sixthStepChecks(config, app);
+  return seventhStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -283,6 +284,33 @@ async function sixthStepChecks(config, app) {
   } catch {
     results.push({ attackId: 'device_registered_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
   }
+  return results;
+}
+
+// 7단계: 6단계 점검을 그대로 두고, 판정기에 가상 접속 사건 세 건을 직접 넣어 본 결과를 더합니다.
+// 로컬 연습이며 실제 자료 차단, 재로그인 확인, 새 요청 허용은 계약이 준비되기 전이라 실행하지 않습니다.
+async function seventhStepChecks(config, app) {
+  const results = await sixthStepChecks(config, app);
+  const expected = '복합 이상 가상 사건은 step_up·step_up_required, 재확인이 붙은 같은 사건과 정상 사건은 allow여야 함';
+  try {
+    const { decide } = await import('./decider.mjs');
+    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', route: 'GET /notes/:id',
+      deviceRegistered: true, stepUp: { verified: false, authAgeSeconds: null }, recentEvents: [] };
+    const normal = await decide({ ...base, requestId: 'local-normal',
+      signals: { source: 'judge_fixture', region: 'local', network: 'usual', hour: 14 } });
+    const unusual = { ...base, signals: { source: 'judge_fixture', region: 'foreign', network: 'unusual', hour: 3 },
+      recentEvents: [{ kind: 'risk_signal', ageSeconds: 60, count: 20 }] };
+    const asked = await decide({ ...unusual, requestId: 'local-unusual' });
+    const confirmed = await decide({ ...unusual, requestId: 'local-confirmed', stepUp: { verified: true, authAgeSeconds: 60 } });
+    const ok = normal.decision === 'allow' && asked.decision === 'step_up'
+      && asked.reasonCode === 'step_up_required' && confirmed.decision === 'allow';
+    results.push({ attackId: 'step_up_required_local', expected,
+      observed: `로컬 가상 사건 연습: 정상 ${normal.decision}, 복합 이상 ${asked.decision}·${asked.reasonCode}, 재확인 뒤 ${confirmed.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님` });
+  } catch {
+    results.push({ attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
+  }
+  results.push({ attackId: 'relogin_block_live', expected: '다시 로그인 확인 전에는 실제 자료가 막히고, 새 로그인 뒤 요청은 다시 판정되어 허용되어야 함',
+    observed: '미실행. 제공 엔진이 새 로그인 시각을 검증하는 계약을 이 저장소에서 확인하지 못함' });
   return results;
 }
 

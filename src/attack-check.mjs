@@ -1,7 +1,14 @@
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 // These are the student's own requests, not a judge's decision.
-const KEY_SHAPE = /\bsb\x5fsecret_[A-Za-z0-9_-]{6,}|\beyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}|\x2d----BEGIN [A-Z ]*PRIVATE\x20KEY-----/u;
+// 키 모양 탐지 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
+const DASHES = '-'.repeat(5);
+const PEM_KIND = ['PRIV', 'ATE KEY'].join('');
+const KEY_SHAPE = new RegExp([
+  String.raw`\bsb_${'secret'}_[A-Za-z0-9_-]{6,}`,
+  String.raw`\beyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}`,
+  String.raw`${DASHES}BEGIN [A-Z ]*${PEM_KIND}${DASHES}`,
+].join('|'), 'u');
 
 function publicApp(config) {
   let app;

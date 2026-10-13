@@ -111,6 +111,7 @@ const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 // 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
 const SECRET_PREFIX = ['sb', 'secret', ''].join('_');
+const PUBLISHABLE_PREFIX = ['sb', 'publishable', ''].join('_');
 const SECRET = `${SECRET_PREFIX}testvalue_never_returned`;
 
 // 자료 저장소(PostgREST)를 흉내 내는 메모리 저장소입니다. 실제 Supabase를 부르지 않습니다.
@@ -388,7 +389,7 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
 
 test('step 4 attack check probes the Data API with the public anon key only', async () => {
   const originalFetch = globalThis.fetch;
-  const key = 'sb\x5fpublishable_abcdefghij1234567890';
+  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
   const step4 = { ...config, step: 4, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];
   const handler = (dataApiStatus, pageHtml) => async (url, init = {}) => {
@@ -440,7 +441,7 @@ test('step 4 attack check probes the Data API with the public anon key only', as
 
 test('step 5 attack check calls the original data url with the public anon key only', async () => {
   const originalFetch = globalThis.fetch;
-  const key = 'sb\x5fpublishable_abcdefghij1234567890';
+  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
   const original = 'https://projref.supabase.co/rest/v1/vault_notes';
   const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];
@@ -505,7 +506,7 @@ test('deployment identity lists allowedRoutes from step 5 and rejects empty or m
 // 로그인 서버 함수: Supabase Auth를 흉내 내는 가짜 fetch만 씁니다. 실제 Supabase나 계정은 부르지 않습니다.
 test('auth api forwards login, refresh and logout without exposing keys or echoing passwords', async () => {
   const { createAuthApi } = await import('../src/auth-api.mjs');
-  const PUBLISHABLE = 'sb\x5fpublishable_testvalue_only_for_server';
+  const PUBLISHABLE = `${PUBLISHABLE_PREFIX}testvalue_only_for_server`;
   const ACCESS = 'aaaa.bbbb.cccc';
   const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE };
   const seen = [];
@@ -581,7 +582,7 @@ test('auth api reports setup and connection problems without leaking secrets', a
     const missing = fakeResponse();
     await createAuthApi({ env: { SUPABASE_URL: 'https://example-project.supabase.co' } }).login({ method: 'POST', body }, missing);
     assert.equal(missing.statusCode, 500);
-    const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb\x5fpublishable_testvalue_only_for_server' };
+    const env = { SUPABASE_URL: 'https://example-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: `${PUBLISHABLE_PREFIX}testvalue_only_for_server` };
     const down = fakeResponse();
     await createAuthApi({ env, fetchImpl: async () => { throw new Error(`boom ${body.password}`); } }).login({ method: 'POST', body }, down);
     assert.equal(down.statusCode, 502);
@@ -600,7 +601,7 @@ test('auth api reports setup and connection problems without leaking secrets', a
 test('step 5 attack check reports whether the page still shows a public key and can use a local env key', async () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
-  const key = 'sb\x5fpublishable_abcdefghij1234567890';
+  const key = `${PUBLISHABLE_PREFIX}abcdefghij1234567890`;
   const original = 'https://projref.supabase.co/rest/v1/vault_notes';
   const step5 = { ...config, step: 5, originalApiUrl: original, identityProvider: { issuer: 'https://projref.supabase.co/auth/v1' } };
   const seen = [];

@@ -27,7 +27,7 @@ test('reader: line count equals alert count, only five fields, fixture untouched
 test('reader: secret-looking values are masked in every extracted field', () => {
   // 키 모양 가짜 값은 실행할 때 조립해 저장소 파일에 키 형태 문자열이 남지 않게 합니다.
   const dashes = '-'.repeat(5);
-  const samples = [`${['sb', 'secret', ''].join('_')}abcdefghijkl`, 'sb\x5fpublishable_abcdefghij1234', ['Bearer', 'abcdefghijklmnop'].join(' '),
+  const samples = [`${['sb', 'secret', ''].join('_')}abcdefghijkl`, `${['sb', 'publishable', ''].join('_')}abcdefghij1234`, ['Bearer', 'abcdefghijklmnop'].join(' '),
     ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'),
     'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123', 'student@example.test', '/cb?access_token=abc123secret&x=1',
     '/a?key=zzz999&b=2', '/a?session=s3ss10n;sig=deadbeef', `${dashes}BEGIN ${'PRIVATE'} KEY${dashes}\nMIIEvQ\n${dashes}END ${'PRIVATE'} KEY${dashes}`];
@@ -35,7 +35,7 @@ test('reader: secret-looking values are masked in every extracted field', () => 
     const row = extract({ timestamp: `t ${secret}`, rule: { level: 5, description: `앞 ${secret} 뒤` }, data: { srcip: `ip ${secret}`, srcuser: secret } });
     const text = JSON.stringify(row);
     assert.match(text, /\[가림\]/u, secret);
-    assert.doesNotMatch(text, /abcdefghijkl|hunter2|abc123|student@|MIIEvQ|PRIVATE\x20KEY|eyJhbGci|zzz999|s3ss10n|deadbeef/u, secret);
+    assert.doesNotMatch(text, new RegExp(`abcdefghijkl|hunter2|abc123|student@|MIIEvQ|${'PRIVATE'} KEY|eyJhbGci|zzz999|s3ss10n|deadbeef`, 'u'), secret);
     assert.match(row.description, /^앞 .* 뒤$/u, '주변 문장은 남김');
   }
   assert.equal(extract({ rule: { description: '검색어 week3 으로 조회했습니다.' } }).description, '검색어 week3 으로 조회했습니다.', '비밀이 아닌 문장은 그대로');

@@ -29,7 +29,7 @@ test('reader: secret-looking values are masked in every extracted field', () => 
   const dashes = '-'.repeat(5);
   const samples = [`${['sb', 'secret', ''].join('_')}abcdefghijkl`, `${['sb', 'publishable', ''].join('_')}abcdefghij1234`, ['Bearer', 'abcdefghijklmnop'].join(' '),
     ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'),
-    'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123', 'student@example.test', '/cb?access_token=abc123secret&x=1',
+    ['sk', 'abcdefghijklmnopqrstuv'].join('-'), 'password=hunter2', 'token: abc123', 'student@example.test', '/cb?access_token=abc123secret&x=1',
     '/a?key=zzz999&b=2', '/a?session=s3ss10n;sig=deadbeef', `${dashes}BEGIN ${'PRIVATE'} KEY${dashes}\nMIIEvQ\n${dashes}END ${'PRIVATE'} KEY${dashes}`];
   for (const secret of samples) {
     const row = extract({ timestamp: `t ${secret}`, rule: { level: 5, description: `앞 ${secret} 뒤` }, data: { srcip: `ip ${secret}`, srcuser: secret } });

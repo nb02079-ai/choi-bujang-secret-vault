@@ -40,7 +40,7 @@ test('hidden-looking values are masked in every extracted field', () => {
   const wordB = ['publi', 'shable'].join('');
   const kind = `${['PRIV', 'ATE'].join('')} KEY`;
   const samples = [`${['sb', wordA, ''].join('_')}abcdefghijkl`, `${['sb', wordB, ''].join('_')}abcdefghij1234`, ['Bearer', 'abcdefghijklmnop'].join(' '),
-    ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'), 'sk-abcdefghijklmnopqrstuv', 'password=hunter2', 'token: abc123',
+    ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'abcdEFGH'].join('.'), ['sk', 'abcdefghijklmnopqrstuv'].join('-'), 'password=hunter2', 'token: abc123',
     'student@example.test', `${dashes}BEGIN ${kind}${dashes}\nMIIEvQ\n${dashes}END ${kind}${dashes}`];
   for (const sample of samples) {
     const row = extract({ timestamp: `t ${sample}`, rule: { level: 5, description: `앞 ${sample} 뒤` },

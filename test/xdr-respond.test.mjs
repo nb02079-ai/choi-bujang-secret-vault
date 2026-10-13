@@ -191,7 +191,7 @@ test('decide.mjs stays a pure judge and the decider rules are untouched', () => 
   assert.doesNotMatch(decideSource, /respond|alerts\.log|appendFile|denyList|deny list/u);
   const decider = readFileSync(new URL('../src/decider.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(decider, /respond|bruteforce|xdr/u);
-  assert.match(decider, /RULE_IDS = Object\.freeze\(\['device_registered'\]\)/u);
+  assert.match(decider, /RULE_IDS = Object\.freeze\(\['starter\.deny'\]\)/u);
   // decide()는 여전히 같은 경보에 같은 답을 냅니다.
   assert.deepEqual(decide(fixture.alerts[0]), decide(fixture.alerts[0]));
 });

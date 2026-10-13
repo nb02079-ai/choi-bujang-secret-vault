@@ -138,7 +138,7 @@
 - `src/decider.mjs`의 `decide(request)`에 규칙 `device_registered` 하나가 있습니다. 요청의 `deviceRegistered`가 정확히 `true`일 때만 `allow`(이유 코드 `approved`)를 반환합니다. `false`, 값 없음, `null`, 그 밖의 값은 모두 `deny`와 `device_not_registered`로 거부합니다. 응답은 계약의 5개 항목만 담고 `ruleIds`는 `['device_registered']`입니다.
 - 이 규칙은 요청에 담긴 `deviceRegistered`만 판단합니다. 사용자 번호, 역할, 기기 키는 읽지 않습니다. 기존 자료실 주소와 브라우저 화면은 바꾸지 않았습니다.
 - `RULE_IDS`는 `['device_registered']` 하나입니다. 시작 틀의 `starter.deny`는 뺐습니다. `aleph.config.json`의 `step`은 `6`이고, `src/attack-check.mjs`는 5단계 점검에 로컬 가상 요청 연습(`device_registered_local`)을 더합니다. 이 연습은 네트워크 요청이 아닙니다.
-- 이번 단계에는 따로 설치할 프로그램이 없습니다. 인증서, CA, 서명 키도 만들지 않았습니다.
+- 이번 단계에는 따로 설치할 프로그램이 없습니다. 새로 만들거나 저장소에 넣은 보안 파일도 없습니다.
 
 **확인하는 순서:**
 1. 저장소 폴더에서 `npm run decider:test`를 실행합니다.

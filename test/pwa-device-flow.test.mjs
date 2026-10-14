@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setDeviceStatus, viewState } from '../public/app-shell.js';
+import { buildOpsView } from '../public/ops-room.js';
 
 // 11단계 과정 3/3: 기기 승인 전에는 보호 자료가 없고, 서버가 승인됨이라고 알린 뒤에만 기존 화면이 열린다.
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -39,7 +40,9 @@ function pageScript() {
   const text = html.replaceAll('\r\n', '\n');
   const start = text.indexOf('<script type="module">\n') + '<script type="module">\n'.length;
   const code = text.slice(start, text.indexOf('</script>', start));
-  return code.replace(/^\s*import \{ setDeviceStatus, viewState \} from '\/app-shell\.js';\s*$/mu, 'const { setDeviceStatus, viewState } = shell;');
+  return code
+    .replace(/^\s*import \{ setDeviceStatus, viewState \} from '\/app-shell\.js';\s*$/mu, 'const { setDeviceStatus, viewState } = shell;')
+    .replace(/^\s*import \{ buildOpsView \} from '\/ops-room\.js';\s*$/mu, 'const { buildOpsView } = opsRoom;');
 }
 function openPage(serve) {
   const nodes = new Map();
@@ -63,8 +66,8 @@ function openPage(serve) {
   const form = document.querySelector('#login-form');
   form.email = { value: 'a@example.test' };
   form.password = { value: 'not-a-real-password' };
-  const run = new AsyncFunction('document', 'window', 'fetch', 'shell', pageScript());
-  const ready = run(document, { confirm: () => true }, fetch, { setDeviceStatus, viewState });
+  const run = new AsyncFunction('document', 'window', 'fetch', 'shell', 'opsRoom', pageScript());
+  const ready = run(document, { confirm: () => true }, fetch, { setDeviceStatus, viewState }, { buildOpsView });
   const settle = async () => { for (let index = 0; index < 12; index += 1) await new Promise((resolve) => setImmediate(resolve)); };
   const q = (selector) => document.querySelector(selector);
   const noteCalls = () => calls.filter((call) => call.path.startsWith('/api/notes'));

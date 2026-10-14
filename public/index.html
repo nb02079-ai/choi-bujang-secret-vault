@@ -61,6 +61,20 @@
     .device .device-approve input { padding: 10px 12px; border: 1px solid #51667c; border-radius: 8px; background: #101a28; color: #ecf4ff; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; }
     .device #device-message { min-height: 1.4em; color: #ffb3c0; }
     .device #device-message.ok { color: #9be3b0; }
+    .ops { margin: 26px 0 0; padding: 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    .ops h2 { margin: 0 0 8px; font-size: 18px; }
+    .ops .ops-note { margin: 0 0 12px; font-size: 14px; }
+    .ops button { padding: 8px 14px; border: 0; border-radius: 8px; background: #8ad8df; color: #101a28; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .ops #ops-cards { display: grid; gap: 12px; margin-top: 14px; }
+    .ops .ops-card { padding: 14px 16px; border: 1px solid #51667c; border-radius: 12px; background: #101a28; }
+    .ops .ops-card h3 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; font-size: 16px; }
+    .ops .ops-tag { padding: 2px 10px; border: 1px solid #51667c; border-radius: 999px; font-size: 13px; font-weight: 700; }
+    .ops .ops-tag[data-tag="확인됨"] { border-color: #9be3b0; color: #9be3b0; }
+    .ops .ops-tag[data-tag="미확인"] { border-color: #d0a373; color: #ffe9cc; }
+    .ops ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; list-style: disc; }
+    .ops li { border: 0; border-radius: 0; padding: 0; background: none; font-size: 14px; line-height: 1.6; color: #bfd0e5; overflow-wrap: anywhere; }
+    .ops ul.ops-records { margin-top: 8px; font-family: ui-monospace, Consolas, monospace; }
+    .ops #ops-message { min-height: 1.4em; margin: 10px 0 0; font-size: 14px; color: #ffb3c0; }
     #offline-banner { margin: 0 0 18px; padding: 12px 16px; border: 1px solid #d0a373; border-radius: 12px; background: #5a45222e; color: #ffe9cc; font-size: 15px; line-height: 1.6; }
   </style>
 </head>
@@ -110,9 +124,17 @@
       <p id="note-message" role="alert" aria-live="polite"></p>
     </section>
     <ul id="notes" aria-live="polite"><li>로그인하면 이 기기의 승인 상태를 확인합니다. 승인된 기기에서만 내 메모가 보입니다.</li></ul>
+    <section class="ops" id="ops-room" aria-labelledby="ops-title" hidden>
+      <h2 id="ops-title">탈환 작전실</h2>
+      <p class="ops-note" id="ops-note">이 화면은 서버가 이번에 돌려준 응답만 보여 줍니다. 화면의 문구는 통과 근거가 아니며 판정은 심판이 합니다. 가상 메모의 제목과 내용은 표시하지 않습니다.</p>
+      <button id="ops-refresh" type="button">작전실 새로고침</button>
+      <div id="ops-cards"></div>
+      <p id="ops-message" role="status" aria-live="polite"></p>
+    </section>
   </main>
   <script type="module">
     import { setDeviceStatus, viewState } from '/app-shell.js';
+    import { buildOpsView } from '/ops-room.js';
     // 이 화면에는 Supabase 주소도 키도 없습니다. 로그인·갱신·로그아웃, 기기 승인, 모든 자료 요청은 서버 함수(/api/...)로만 보냅니다.
     // 로그인 토큰은 이 화면의 메모리에만 두고 브라우저 저장소에는 쓰지 않습니다. 새로고침하면 다시 로그인합니다.
     // 기기를 알아보는 값은 서버가 HttpOnly 쿠키로 내려 주며 이 화면의 스크립트는 읽을 수 없습니다.
@@ -211,6 +233,13 @@
       approveInput: document.querySelector('#approve-code'),
       message: document.querySelector('#device-message'),
     };
+    const ops = {
+      section: document.querySelector('#ops-room'),
+      refresh: document.querySelector('#ops-refresh'),
+      cards: document.querySelector('#ops-cards'),
+      message: document.querySelector('#ops-message'),
+    };
+    let opsLoaded = false;
     let deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
     const sayDevice = (text, ok = false) => {
       device.message.textContent = text;
@@ -228,6 +257,8 @@
         ? `승인 코드: ${deviceState.code} (이미 승인된 기기에서 로그인해 이 코드를 입력하면 승인됩니다. 약 ${Math.max(1, Math.ceil((deviceState.expiresInSeconds ?? 0) / 60))}분 안에 입력하세요.)`
         : '';
       editor.hidden = !view.showEditor;
+      ops.section.hidden = !view.showEditor;
+      if (!view.showEditor) ops.cards.replaceChildren();
       if (!view.showNotes) listMessage(view.message);
     };
     const deviceCall = async (method, path, payload) => {
@@ -398,6 +429,60 @@
       return item;
     };
 
+    // 탈환 작전실: 서버가 이번에 돌려준 요약만 글자로 보입니다. 화면이 스스로 만든 성공 문구는 없습니다.
+    const renderOps = (summary) => {
+      const view = buildOpsView(summary);
+      const boxes = view.cards.map((card) => {
+        const box = element('div', undefined, 'ops-card');
+        const head = element('h3', card.title);
+        const tag = element('span', card.tag, 'ops-tag');
+        tag.dataset.tag = card.tag;
+        head.append(tag);
+        const lines = element('ul');
+        card.lines.forEach((line) => lines.append(element('li', line)));
+        box.append(head, lines);
+        if (card.records.length) {
+          const records = element('ul', undefined, 'ops-records');
+          card.records.forEach((record) => records.append(element('li', record)));
+          box.append(records);
+        }
+        return box;
+      });
+      const rest = element('div', undefined, 'ops-card');
+      const restHead = element('h3', '미실행·미기록 안내');
+      const restTag = element('span', '미실행', 'ops-tag');
+      restTag.dataset.tag = '미실행';
+      restHead.append(restTag);
+      const restLines = element('ul');
+      view.notRun.forEach((line) => restLines.append(element('li', line)));
+      restLines.append(element('li', view.readAt ? `서버 응답 시각: ${view.readAt}` : '서버 응답 시각을 읽지 못했습니다.'));
+      rest.append(restHead, restLines);
+      ops.cards.replaceChildren(...boxes, rest);
+    };
+    const loadOps = async () => {
+      if (deviceState.status !== 'approved') return;
+      ops.message.textContent = '작전실 요약을 불러오는 중입니다.';
+      try {
+        const reply = await deviceCall('GET', '/api/ops/summary');
+        if (reply.status === 403 && reply.result?.code === 'device_not_approved') {
+          deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+          renderDevice();
+          return;
+        }
+        if (!reply.ok) {
+          ops.cards.replaceChildren();
+          ops.message.textContent = reply.result?.error ?? `작전실 요약을 읽지 못했습니다 (HTTP ${reply.status})`;
+          return;
+        }
+        renderOps(reply.result);
+        ops.message.textContent = '';
+      } catch (error) {
+        ops.cards.replaceChildren();
+        ops.message.textContent = error.message;
+      }
+    };
+    ops.refresh.addEventListener('click', loadOps);
+
     let latest = 0;
     let currentSession = null;
     const loadNotes = async () => {
@@ -406,6 +491,7 @@
         renderDevice();
         return;
       }
+      if (!opsLoaded) { opsLoaded = true; loadOps(); }
       try {
         const notes = await callApi('GET', '/api/notes');
         if (ticket !== latest) return;
@@ -449,6 +535,7 @@
       sayNote('');
       if (!token || !wasSignedIn) {
         sayDevice('');
+        opsLoaded = false;
         deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
         renderDevice();
         if (token) loadDevice().then(loadNotes);

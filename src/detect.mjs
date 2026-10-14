@@ -58,6 +58,8 @@ export function readDetectionEvents(events) {
 // 실제 회수와 걸린 시간은 심판이 확인합니다. 기준(120건, 10분)은 docs/DETECT_EVENTS.md의 연습 계약을 따릅니다.
 const BURST_WINDOW_MS = 10 * 60 * 1000;
 const BURST_READ_MAX = 120;
+// 작전실 화면이 현재 탐지 기준을 읽는 용도의 읽기 전용 값입니다. 탐지 동작에는 영향이 없습니다.
+export const DETECTION_RULE = Object.freeze({ windowSeconds: BURST_WINDOW_MS / 1000, threshold: BURST_READ_MAX, reasonCode: 'burst_read' });
 
 function burstDetected(times) {
   // times: 한 (주체, 기기) 쌍의 GET 사건을 시각 순으로 정렬한 [{ at, network }]

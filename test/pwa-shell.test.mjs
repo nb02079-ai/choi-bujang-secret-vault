@@ -77,7 +77,7 @@ test('화면: manifest와 아이콘을 연결하고 기기 승인 상태를 확�
 test('화면이 부르는 서버 경로는 기존과 같고 새 브라우저 저장소 호출이 늘지 않았다', () => {
   const paths = new Set([...html.matchAll(/['"`](\/api\/[A-Za-z0-9_/${}.]*)['"`]/gu)].map((match) => match[1]));
   assert.deepEqual([...paths].sort(), ['/api/auth/login', '/api/auth/logout', '/api/auth/refresh', '/api/device/approve',
-    '/api/device/request', '/api/device/status', '/api/notes', '/api/notes/${note.id}']);
+    '/api/device/request', '/api/device/status', '/api/notes', '/api/notes/${note.id}', '/api/ops/summary']);
   // 11단계부터 로그인 토큰도 어떤 브라우저 저장소에도 쓰지 않는다 (sessionStorage 사용을 없앴다).
   for (const text of [html, codeOnly(shell)]) {
     assert.doesNotMatch(text, /sessionStorage|localStorage|indexedDB|document\.cookie|\bcaches\./u);

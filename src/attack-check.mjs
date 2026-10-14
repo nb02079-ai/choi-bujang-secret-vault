@@ -46,7 +46,10 @@ const send = (url, init = {}, attackId = '') => {
   const method = String(init.method ?? 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') throw new Error('write_request_not_allowed');
   if (!ATTACK_ID.test(attackId)) throw new Error('attack_id_required');
-  return fetch(url, { ...init, headers: { ...init.headers, 'x-attack-id': attackId }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  // 우리 앱으로 보내는 요청에는 쿼리 attackId도 적습니다. Data API(/rest/)는 모르는 쿼리를 열 조건으로 읽으므로 붙이지 않습니다.
+  const target = new URL(url);
+  if (!target.pathname.startsWith('/rest/')) target.searchParams.set('attackId', attackId);
+  return fetch(target, { ...init, headers: { ...init.headers, 'x-attack-id': attackId }, redirect: 'error', signal: AbortSignal.timeout(10000) });
 };
 
 // 실행하지 않은 점검: observed는 정확히 not_run, 이유는 expected 끝에 적습니다.
@@ -205,9 +208,11 @@ async function thirdStepChecks(app) {
 // 접두사는 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
 const PUBLIC_ACCESS_PREFIX = ['sb', ['publi', 'shable'].join(''), ''].join('_');
 const PUBLIC_ACCESS_VALUE = `${PUBLIC_ACCESS_PREFIX}[A-Za-z0-9_-]{10,}`;
-async function readPublicAccessValue(app, attackId) {
+async function readPublicAccessValue(app, attackId, pageFallback = true) {
   const fromEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
   if (typeof fromEnv === 'string' && new RegExp(`^${PUBLIC_ACCESS_VALUE}$`, 'u').test(fromEnv)) return fromEnv;
+  // 6단계부터는 첫 화면에 값이 없으므로 화면을 읽는 요청을 보내지 않습니다. 점검이 not_run인데 요청만 남는 일을 막습니다.
+  if (!pageFallback) return null;
   try {
     const page = await (await send(app, {}, attackId)).text();
     return new RegExp(PUBLIC_ACCESS_VALUE, 'u').exec(page)?.[0] ?? null;
@@ -219,14 +224,14 @@ async function readPublicAccessValue(app, attackId) {
 async function fourthStepChecks(config, app) {
   let dataApi = null;
   try { dataApi = new URL('/rest/v1/vault_notes', new URL(config.identityProvider.issuer).origin); } catch { /* not_run으로 남김 */ }
-  return anonDirectChecks(app, dataApi);
+  return anonDirectChecks(app, dataApi, true);
 }
 
-async function anonDirectChecks(app, dataApi) {
+async function anonDirectChecks(app, dataApi, pageFallback) {
   const kept = (await thirdStepChecks(app))
     .filter(item => !['logged_in_crud', 'cross_user_access'].includes(item.attackId));
 
-  const key = dataApi ? await readPublicAccessValue(app, 'anon_direct_read_rejected') : null;
+  const key = dataApi ? await readPublicAccessValue(app, 'anon_direct_read_rejected', pageFallback) : null;
   if (!dataApi || !key) {
     kept.push(notRun('anon_direct_read_rejected', '공개 접속값으로 Data API에 직접 목록을 읽으면 거부되어야 함',
       '직접 요청에 쓸 공개 접속값(터미널 환경변수 또는 배포된 페이지)이나 Data API 주소를 찾지 못함'));
@@ -254,13 +259,13 @@ async function fifthStepChecks(config, app) {
     original = new URL(config.originalApiUrl);
     if (original.protocol !== 'https:' || original.search || original.hash || original.username || original.password) original = null;
   } catch { /* not_run으로 남김 */ }
-  const results = (await anonDirectChecks(app, original))
+  const results = (await anonDirectChecks(app, original, config.step <= 5))
     .filter(item => item.attackId !== 'logged_in_own_crud');
 
   results.push(await pageKeyCheck(app));
 
   const expected = '공개 접속값으로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
-  const key = original ? await readPublicAccessValue(app, 'original_url_no_notes') : null;
+  const key = original ? await readPublicAccessValue(app, 'original_url_no_notes', config.step <= 5) : null;
   if (!original || !key) {
     results.push(notRun('original_url_no_notes', expected, '원본 자료 주소(originalApiUrl)나 공개 접속값을 찾지 못함'));
   } else {

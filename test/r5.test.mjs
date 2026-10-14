@@ -45,7 +45,7 @@ test('first attack check reads public data.json without credentials', async () =
       });
     };
     const [result] = await runAttackChecks(config);
-    assert.equal(requestUrl, 'https://student-defense.vercel.app/data.json');
+    assert.equal(requestUrl, 'https://student-defense.vercel.app/data.json?attackId=anonymous_note_read');
     assert.equal(options.redirect, 'error');
     assert.match(result.observed, /확인 표시가 보임/u);
     globalThis.fetch = async () => new Response('<html>not the data</html>', { status: 200 });

@@ -22,11 +22,15 @@ const hex = (char) => char.repeat(64);
 // ---- 표시 규칙(buildOpsView) 단위 시험 ----
 const goodSummary = () => ({
   schema: OPS_SCHEMA, readAt: stamp(0),
-  decider: { confirmed: true, source: 'code', ruleIds: ['device_registered', 'step_up_required'], ruleCount: 2, zoneRouteCount: 6, allowedRouteCount: 4, policyDigest: 'abcdef012345',
+  decider: { kind: 'definition', source: 'code', ruleIds: ['device_registered', 'step_up_required'],
     results: { recorded: false, reason: '판정기는 판정 결과를 저장하지 않아 집계할 수 없습니다.' } },
-  detection: { confirmed: true, source: 'code', rule: { windowSeconds: 600, threshold: 120, reasonCode: 'burst_read' }, events: { recorded: false, reason: '탐지 사건을 남기는 저장소가 없어 사건 수를 알 수 없습니다.' } },
-  revocation: { confirmed: true, source: 'vault_devices', total: 3, truncated: false, counts: { pending: 1, expired: 0, approved: 1, denied: 0, revoked: 1, other: 0 },
-    records: [{ ref: 'a1a1a1a1', status: 'approved', createdAt: stamp(-5), decidedAt: stamp(-4) }], enforcement: { run: false, reason: '실제 집행은 심판이 확인합니다.' } },
+  detection: { kind: 'definition', source: 'code', rule: { windowSeconds: 600, threshold: 120, reasonCode: 'burst_read' }, events: { recorded: false, reason: '탐지 사건을 남기는 저장소가 없어 사건 수를 알 수 없습니다.' } },
+  revocation: { confirmed: true, source: 'vault_devices', total: 3, truncated: false, counts: { pending: 1, approved: 1, denied: 0, revoked: 1, other: 0 },
+    records: [
+      { ref: 'a1a1a1a1', status: 'approved', createdAt: stamp(-5), decidedAt: stamp(-4), expiresAt: stamp(5) },
+      { ref: 'a2a2a2a2', status: 'pending', createdAt: stamp(-3), decidedAt: null, expiresAt: stamp(7) },
+      { ref: 'a3a3a3a3', status: 'revoked', createdAt: stamp(-2), decidedAt: stamp(-1), expiresAt: stamp(9) },
+    ], enforcement: { run: false, reason: '실제 집행은 심판이 확인합니다.' } },
   recovery: { confirmed: true, source: 'x', backups: { confirmed: true, total: 1, truncated: false, records: [{ ref: 'c1c1c1c1', hash12: '111111111111', at: stamp(-9) }] },
     restores: { confirmed: true, total: 1, truncated: false, records: [{ ref: 'c1c1c1c1', hash12: '222222222222', outcome: 'restored', at: stamp(-3) }] },
     policySnapshot: { confirmed: false, reason: '정책 사본은 로컬 파일이라 서버가 버전을 읽을 수 없습니다.' } },
@@ -34,24 +38,30 @@ const goodSummary = () => ({
 });
 const flat = (view) => [...view.cards.flatMap((card) => [card.title, card.tag, ...card.lines, ...card.records]), ...view.notRun].join('\n');
 
-test('표시 규칙: 서버가 읽었다고 알린 구역만 확인됨이고 기록이 없는 항목은 미기록·미실행으로 구분한다', () => {
+test('표시 규칙: 정의, 확인됨, 미확인을 구분하고 기록이 없는 항목은 미기록·미실행으로 적는다', () => {
   const view = buildOpsView(goodSummary());
   assert.equal(view.note, OPS_NOTE);
   assert.match(view.note, /통과 근거가 아니며 판정은 심판이 합니다/u);
-  assert.deepEqual(view.cards.map((card) => [card.id, card.tag]), [['decider', '확인됨'], ['detection', '확인됨'], ['revocation', '확인됨'], ['recovery', '확인됨']]);
+  assert.deepEqual(view.cards.map((card) => [card.id, card.tag]), [['decider', '정의'], ['detection', '정의'], ['revocation', '확인됨'], ['recovery', '확인됨']]);
   const text = flat(view);
-  assert.match(text, /규칙 2개: device_registered, step_up_required/u);
+  assert.match(text, /규칙 이름\(코드의 정의, 판정 결과가 아님\): device_registered, step_up_required/u);
+  assert.doesNotMatch(text, /규칙 [0-9]+개|구역 경로|정책 지문/u, '화면이 개수나 지문을 만들어 보이지 않는다');
   assert.match(text, /판정 결과 집계: 미기록/u);
   assert.match(text, /탐지 사건: 미기록/u);
   assert.match(text, /600초 안에 GET 120건 초과, 이유 코드 burst_read/u);
   assert.match(text, /내 기기 3개/u);
-  assert.match(text, /승인 대기 1, 대기 만료 0, 승인됨 1, 거부됨 0, 폐기됨 1, 기타 0/u);
+  assert.match(text, /승인 대기 1, 승인됨 1, 거부됨 0, 폐기됨 1, 기타 0/u);
+  assert.doesNotMatch(text, /대기 만료/u);
   assert.match(text, /실제 회수 집행: 미실행/u);
   assert.match(text, /정책 사본 버전: 미확인/u);
   assert.match(text, /기기 a1a1a1a1 · 승인됨/u);
   assert.match(text, /복원 메모 c1c1c1c1 · 해시 222222222222 · restored/u);
   assert.equal(view.notRun.length, 1);
   assert.match(view.readAt, /^2026-10-14 00:00:00 UTC$/u);
+  // 화면 수치와 가린 기록 줄 수가 같다
+  const revocation = view.cards.find((card) => card.id === 'revocation');
+  assert.equal(revocation.records.length, 3);
+  assert.ok(revocation.lines[0].includes('내 기기 3개'));
 });
 
 test('표시 규칙: 서버가 읽지 못한 구역과 잘못된 응답은 미확인이고 성공 문구를 만들지 않는다', () => {
@@ -60,7 +70,7 @@ test('표시 규칙: 서버가 읽지 못한 구역과 잘못된 응답은 미�
   partial.recovery.restores = { confirmed: false, source: 'vault_restore_audit', reason: '이번 요청에서 읽지 못했습니다.' };
   const view = buildOpsView(partial);
   assert.equal(view.cards.find((card) => card.id === 'revocation').tag, '미확인');
-  assert.equal(view.cards.find((card) => card.id === 'decider').tag, '확인됨');
+  assert.equal(view.cards.find((card) => card.id === 'decider').tag, '정의');
   const text = flat(view);
   assert.match(text, /기기 승인 기록을 읽지 못했습니다/u);
   assert.match(text, /복원 기록을 읽지 못했습니다/u);
@@ -75,24 +85,59 @@ test('표시 규칙: 서버가 읽지 못한 구역과 잘못된 응답은 미�
   assert.doesNotMatch(flat(buildOpsView(null)), /성공|통과했|방어 완료|클리어|정상 작동/u);
 });
 
+test('표시 규칙: 서버 수치와 가린 기록이 맞지 않으면 숫자를 보이지 않고 미확인으로 둔다', () => {
+  const cases = {
+    '총수가 목록보다 큼': (s) => { s.revocation.total = 14; },
+    '총수가 목록보다 작음': (s) => { s.revocation.total = 2; },
+    '상태별 수가 목록과 다름': (s) => { s.revocation.counts.approved = 2; },
+    '모르는 상태 값': (s) => { s.revocation.records[0].status = 'expired'; },
+    'truncated 값이 없음': (s) => { delete s.revocation.truncated; },
+    '상태별 수가 없음': (s) => { delete s.revocation.counts; },
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    const summary = goodSummary();
+    mutate(summary);
+    const card = buildOpsView(summary).cards.find((item) => item.id === 'revocation');
+    assert.equal(card.tag, '미확인', label);
+    assert.doesNotMatch([...card.lines, ...card.records].join('\n'), /내 기기 [0-9]|승인 대기 [0-9]/u, label);
+    assert.deepEqual(card.records, [], label);
+  }
+  const summary = goodSummary();
+  summary.recovery.backups.total = 9;
+  const card = buildOpsView(summary).cards.find((item) => item.id === 'recovery');
+  assert.doesNotMatch(card.lines.join('\n'), /사본 [0-9]+건/u);
+  assert.match(card.lines.join('\n'), /사본: 서버 응답의 수치와 가린 기록이 맞지 않아/u);
+  assert.match(card.lines.join('\n'), /복원 기록 1건/u);
+  assert.equal(card.tag, '미확인', '맞지 않는 구역이 하나라도 있으면 확인됨으로 표시하지 않는다');
+});
+
+test('표시 규칙: 읽기 한도에서 잘린 기록은 이상(한도까지만 표시)으로 알린다', () => {
+  const summary = goodSummary();
+  summary.revocation.records = Array.from({ length: 100 }, (_, index) => ({ ref: index.toString(16).padStart(8, '0'), status: 'pending', createdAt: stamp(-index), decidedAt: null, expiresAt: null }));
+  summary.revocation.total = 100;
+  summary.revocation.truncated = true;
+  summary.revocation.counts = { pending: 100, approved: 0, denied: 0, revoked: 0, other: 0 };
+  const card = buildOpsView(summary).cards.find((item) => item.id === 'revocation');
+  assert.equal(card.tag, '확인됨');
+  assert.equal(card.records.length, 100);
+  assert.match(card.lines[0], /내 기기 100개 이상\(읽기 한도 100건까지만 표시\)/u);
+});
+
 test('표시 규칙: 모든 값은 형식을 검사한 글자로만 쓰고 이상한 값은 -로 바꾼다', () => {
   const odd = goodSummary();
-  odd.decider.ruleCount = -1;
-  odd.decider.zoneRouteCount = 1.5;
-  odd.decider.policyDigest = '<script>alert(1)</script>';
   odd.decider.ruleIds = ['<img src=x>', 'device_registered', 7];
-  odd.revocation.total = '5';
-  odd.revocation.records = [{ ref: '<b>', status: '<i>', createdAt: 'x', decidedAt: null }, null, 'x'];
+  odd.detection.rule = { windowSeconds: -1, threshold: 1.5, reasonCode: '<b>' };
+  odd.revocation.records = [{ ref: '<b>', status: 'pending', createdAt: 'x', decidedAt: null }, { ref: 'zz', status: 'approved', createdAt: stamp(0), decidedAt: stamp(1) }, { status: 'revoked' }];
+  odd.revocation.total = 3;
+  odd.revocation.counts = { pending: 1, approved: 1, denied: 0, revoked: 1, other: 0 };
   odd.recovery.restores.records = [{ ref: 'ZZZZZZZZ', hash12: 'full'.repeat(20), outcome: '<x>', at: 'not-a-date' }];
   odd.notRun = [null, 'x', { text: 7 }, { text: '가'.repeat(500) }];
   const view = buildOpsView(odd);
   const text = flat(view);
   assert.doesNotMatch(text, /<script>|<img|<b>|<i>|<x>/u);
-  assert.match(text, /규칙 -개: device_registered/u);
-  assert.match(text, /구역 경로 -개/u);
-  assert.match(text, /정책 지문: -/u);
-  assert.match(text, /내 기기 -개/u);
-  assert.match(text, /기기 - · 기타 · 요청 시각 미상/u);
+  assert.match(text, /규칙 이름\(코드의 정의, 판정 결과가 아님\): device_registered/u);
+  assert.match(text, /- 초 안에 GET -건 초과|-초 안에 GET -건 초과/u);
+  assert.match(text, /기기 - · 승인 대기 · 요청 시각 미상/u);
   assert.match(text, /복원 메모 - · 해시 - · - · 시각 미상/u);
   assert.equal(view.notRun.length, 1);
   assert.ok(view.notRun[0].length <= 200);
@@ -208,10 +253,10 @@ test('화면 실행: 화면의 수치와 가린 서버 기록이 서로 맞고 �
 
     // 원본 기록의 집계를 시험이 직접 계산해 화면 숫자와 대조한다
     const devices = w.tables.vault_devices.filter((row) => row.owner_id === USER_A);
-    const count = (state) => devices.filter((row) => (state === 'expired' ? row.status === 'pending' && Date.parse(row.expires_at) <= NOW
-      : state === 'pending' ? row.status === 'pending' && Date.parse(row.expires_at) > NOW : row.status === state)).length;
+    const count = (state) => devices.filter((row) => row.status === state).length;
     assert.ok(shown.includes(`내 기기 ${devices.length}개`));
-    assert.ok(shown.includes(`승인 대기 ${count('pending')}, 대기 만료 ${count('expired')}, 승인됨 ${count('approved')}, 거부됨 ${count('denied')}, 폐기됨 ${count('revoked')}, 기타 0`));
+    assert.ok(shown.includes(`승인 대기 ${count('pending')}, 승인됨 ${count('approved')}, 거부됨 ${count('denied')}, 폐기됨 ${count('revoked')}, 기타 0`));
+    assert.ok(!shown.includes('대기 만료'), '현재 시각으로 계산한 상태는 화면에 없다');
     assert.ok(shown.includes(`사본 ${w.tables.vault_notes_backup.length}건`));
     assert.ok(shown.includes(`복원 기록 ${w.tables.vault_restore_audit.length}건`));
     // 가린 기록: 번호 앞 8자와 해시 앞 12자가 서버 기록과 같다
@@ -220,11 +265,12 @@ test('화면 실행: 화면의 수치와 가린 서버 기록이 서로 맞고 �
     assert.ok(shown.includes(`사본 메모 c1c1c1c1 · 해시 ${hex('1').slice(0, 12)}`));
     // 줄 수도 기록 수와 맞는다
     const recordLines = (prefix) => shown.split('\n').filter((line) => line.startsWith(prefix)).length;
-    assert.equal(recordLines('기기 '), devices.length + 0);
+    assert.equal(recordLines('기기 '), devices.length);
     assert.equal(recordLines('복원 메모 '), w.tables.vault_restore_audit.length);
     assert.equal(recordLines('사본 메모 '), w.tables.vault_notes_backup.length);
 
     // 미실행·미기록은 따로 보인다
+    assert.ok(!/규칙 [0-9]+개|구역 경로|정책 지문/u.test(shown), '화면에 계산한 규칙 수나 지문이 없다');
     for (const phrase of ['판정 결과 집계: 미기록', '탐지 사건: 미기록', '실제 회수 집행: 미실행', '정책 사본 버전: 미확인', '미실행·미기록 안내']) {
       assert.ok(shown.includes(phrase), phrase);
     }

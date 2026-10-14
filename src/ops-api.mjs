@@ -3,17 +3,18 @@
 //
 // 응답에 들어가는 수치는 이 요청에서 실제로 읽은 값뿐입니다. 읽지 못한 구역은 confirmed:false로 알리고,
 // 기록이 남지 않는 판정 결과와 탐지 사건, 심판이 확인하는 실제 회수 집행은 미기록·미실행으로 따로 적습니다.
+// 화면의 수치는 가린 기록에서 직접 센 값입니다. 읽은 기록 전부(최대 100건)를 가린 기록으로 돌려주고 총수와 상태별 수를 그 목록에서 세므로
+// 수치와 가린 기록의 줄 수가 항상 같습니다. 코드에서 읽은 정의(규칙 이름, 탐지 기준)는 결과가 아니라 정의로 따로 표시합니다.
+// 서버가 계산해 만든 값(정책 지문, 개수, 현재 시각으로 만든 만료 상태)은 싣지 않습니다.
 // 본인(로그인한 계정)의 기록만 읽습니다. 메모 제목·내용, 쿠키 값, 해시 원문, 승인 코드, 소유자 번호, 전체 UUID는 싣지 않습니다.
-import { createHash } from 'node:crypto';
 import config from '../aleph.config.json' with { type: 'json' };
 import { describePolicy } from './decider.mjs';
 import { DETECTION_RULE } from './detect.mjs';
 import { createDeviceCheck } from './device-api.mjs';
-import { canonical } from './policy-diff.mjs';
 import { createLoginVerifier } from './verify-login.mjs';
 
 export const OPS_SCHEMA = 'vault.ops.summary.v1';
-export const RECORD_LIMIT = 10;
+export const RECORD_LIMIT = 100; // 가린 기록은 읽은 기록 전부이며 FETCH_LIMIT와 같습니다.
 export const FETCH_LIMIT = 100;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -51,9 +52,11 @@ function createReader(env, fetchImpl) {
 }
 
 const unconfirmed = (source) => ({ confirmed: false, source, reason: '이번 요청에서 읽지 못했습니다.' });
+// 읽은 기록 전부(최대 FETCH_LIMIT건)를 가린 기록으로 돌려줍니다. 총수는 이 목록의 길이이고,
+// 상한보다 많은 기록이 있으면 truncated로 알립니다(그때도 목록과 총수는 같은 100건입니다).
 const listed = (rows, shape, field) => {
-  const items = rows.map(shape).sort(newestFirst(field));
-  return { total: rows.length, truncated: rows.length >= FETCH_LIMIT, records: items.slice(0, RECORD_LIMIT) };
+  const records = rows.slice(0, FETCH_LIMIT).map(shape).sort(newestFirst(field));
+  return { total: records.length, truncated: rows.length > FETCH_LIMIT, records };
 };
 
 export function createOpsApi({ verify = defaultVerify, env = process.env, fetchImpl = fetch, now = Date.now, deviceCheck = null } = {}) {
@@ -102,40 +105,35 @@ export function createOpsApi({ verify = defaultVerify, env = process.env, fetchI
     const owner = `eq.${checked.identity.userId}`;
     const nowMs = now();
 
-    const policy = { ...describePolicy(), allowedRoutes: [...config.allowedRoutes] };
+    // 코드에서 읽은 정의입니다. 판정이나 탐지의 결과가 아니므로 kind를 definition으로 알립니다.
     const decider = {
-      confirmed: true, source: 'code', ruleIds: policy.ruleIds, ruleCount: policy.ruleIds.length,
-      zoneRouteCount: Object.values(policy.zoneRoutes).reduce((sum, list) => sum + list.length, 0),
-      allowedRouteCount: policy.allowedRoutes.length,
-      policyDigest: createHash('sha256').update(canonical(policy)).digest('hex').slice(0, 12),
+      kind: 'definition', source: 'code', ruleIds: [...describePolicy().ruleIds],
       results: { recorded: false, reason: '판정기는 판정 결과를 저장하지 않아 집계할 수 없습니다.' },
     };
     const detection = {
-      confirmed: true, source: 'code', rule: { ...DETECTION_RULE },
+      kind: 'definition', source: 'code', rule: { ...DETECTION_RULE },
       events: { recorded: false, reason: '탐지 사건을 남기는 저장소가 없어 사건 수를 알 수 없습니다.' },
     };
 
+    // 한 번 더 읽어 최대 FETCH_LIMIT건을 넘는지 알 수 있게 1건 더 요청합니다.
+    const readLimit = String(FETCH_LIMIT + 1);
     const [deviceRows, backupRows, auditRows] = await Promise.all([
-      read('vault_devices', { select: 'id,status,created_at,decided_at,expires_at', owner_id: owner, order: 'created_at.desc', limit: String(FETCH_LIMIT) }),
-      read('vault_notes_backup', { select: 'id,content_sha256,backed_up_at', owner_id: owner, order: 'backed_up_at.desc', limit: String(FETCH_LIMIT) }),
-      read('vault_restore_audit', { select: 'id,note_id,content_sha256,outcome,restored_at', owner_id: owner, order: 'restored_at.desc', limit: String(FETCH_LIMIT) }),
+      read('vault_devices', { select: 'id,status,created_at,decided_at,expires_at', owner_id: owner, order: 'created_at.desc', limit: readLimit }),
+      read('vault_notes_backup', { select: 'id,content_sha256,backed_up_at', owner_id: owner, order: 'backed_up_at.desc', limit: readLimit }),
+      read('vault_restore_audit', { select: 'id,note_id,content_sha256,outcome,restored_at', owner_id: owner, order: 'restored_at.desc', limit: readLimit }),
     ]);
 
-    let revocation = { ...unconfirmed('vault_devices') };
+    const enforcement = { run: false, reason: 'propose_revocation 제안의 실제 집행은 심판이 확인하므로 이 화면에서 확인할 수 없습니다.' };
+    let revocation = { ...unconfirmed('vault_devices'), enforcement };
     if (deviceRows) {
-      const counts = { pending: 0, expired: 0, approved: 0, denied: 0, revoked: 0, other: 0 };
-      const state = (row) => {
-        if (row.status === 'pending') return Date.parse(row.expires_at) > nowMs ? 'pending' : 'expired';
-        return DEVICE_STATES.includes(row.status) ? row.status : 'other';
-      };
-      for (const row of deviceRows) counts[state(row)] += 1;
-      revocation = {
-        confirmed: true, source: 'vault_devices', counts,
-        ...listed(deviceRows, (row) => ({ ref: ref(row.id), status: state(row), createdAt: iso(row.created_at), decidedAt: iso(row.decided_at) }), 'createdAt'),
-        enforcement: { run: false, reason: 'propose_revocation 제안의 실제 집행은 심판이 확인하므로 이 화면에서 확인할 수 없습니다.' },
-      };
-    } else {
-      revocation.enforcement = { run: false, reason: 'propose_revocation 제안의 실제 집행은 심판이 확인하므로 이 화면에서 확인할 수 없습니다.' };
+      // 상태는 저장된 값 그대로입니다. 현재 시각과 비교해 만든 상태(만료 등)는 만들지 않고 만료 시각만 가려서 보입니다.
+      const list = listed(deviceRows, (row) => ({
+        ref: ref(row.id), status: DEVICE_STATES.includes(row.status) ? row.status : 'other',
+        createdAt: iso(row.created_at), decidedAt: iso(row.decided_at), expiresAt: iso(row.expires_at),
+      }), 'createdAt');
+      const counts = { pending: 0, approved: 0, denied: 0, revoked: 0, other: 0 };
+      for (const record of list.records) counts[record.status] += 1;
+      revocation = { confirmed: true, source: 'vault_devices', counts, ...list, enforcement };
     }
 
     const backups = backupRows

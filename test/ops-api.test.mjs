@@ -111,7 +111,7 @@ test('요약의 수치는 본인 기록 원본의 집계와 같고 가린 기록
 
     // 회수 상태: 기기 승인 표의 원본 집계와 같다
     const mine = w.tables.vault_devices.filter((row) => row.owner_id === USER_A);
-    const expectedCounts = { pending: 1, expired: 1, approved: 1, denied: 1, revoked: 1, other: 0 };
+    const expectedCounts = { pending: 2, approved: 1, denied: 1, revoked: 1, other: 0 };
     assert.deepEqual(body.revocation.counts, expectedCounts);
     assert.equal(body.revocation.total, mine.length);
     assert.equal(body.revocation.total, Object.values(body.revocation.counts).reduce((sum, value) => sum + value, 0));
@@ -123,9 +123,12 @@ test('요약의 수치는 본인 기록 원본의 집계와 같고 가린 기록
       assert.ok(row, record.ref);
       assert.equal(record.createdAt, new Date(row.created_at).toISOString());
       assert.equal(record.decidedAt, row.decided_at ? new Date(row.decided_at).toISOString() : null);
+      assert.equal(record.expiresAt, row.expires_at ? new Date(row.expires_at).toISOString() : null);
+      assert.equal(record.status, row.status, '상태는 저장된 값 그대로이고 현재 시각으로 만든 상태가 아니다');
     }
     assert.deepEqual(Object.fromEntries(Object.keys(expectedCounts).map((state) => [state, body.revocation.records.filter((record) => record.status === state).length])), expectedCounts);
     assert.deepEqual(body.revocation.enforcement.run, false);
+    assert.ok(!('expired' in body.revocation.counts), '현재 시각으로 계산한 만료 상태를 만들지 않는다');
 
     // 복구 버전: 사본과 복원 기록의 원본 집계와 같다
     const backups = w.tables.vault_notes_backup.filter((row) => row.owner_id === USER_A);
@@ -141,24 +144,29 @@ test('요약의 수치는 본인 기록 원본의 집계와 같고 가린 기록
   } finally { w.done(); }
 });
 
-test('판정기 규칙과 탐지 기준은 코드에서 읽은 값이고 판정 결과와 탐지 사건은 미기록으로 알린다', async () => {
+test('판정기 규칙과 탐지 기준은 코드에서 읽은 정의로만 알리고 계산한 값과 결과를 싣지 않는다', async () => {
   const w = world();
   try {
     const { decider, detection, notRun } = (await asA(w)).body;
-    const policy = { ...describePolicy(), allowedRoutes: [...config.allowedRoutes] };
-    assert.equal(decider.confirmed, true);
+    assert.deepEqual(Object.keys(decider).sort(), ['kind', 'results', 'ruleIds', 'source']);
+    assert.equal(decider.kind, 'definition');
+    assert.equal(decider.source, 'code');
     assert.deepEqual(decider.ruleIds, [...RULE_IDS]);
-    assert.equal(decider.ruleCount, 5);
-    assert.equal(decider.zoneRouteCount, Object.values(policy.zoneRoutes).flat().length);
-    assert.equal(decider.allowedRouteCount, config.allowedRoutes.length);
-    assert.equal(decider.policyDigest, sha(canonical(policy)).slice(0, 12));
+    for (const computed of ['ruleCount', 'zoneRouteCount', 'allowedRouteCount', 'policyDigest', 'confirmed']) {
+      assert.ok(!(computed in decider), `${computed}: 서버가 계산해 만든 값은 싣지 않는다`);
+    }
     assert.equal(decider.results.recorded, false);
-    assert.equal(detection.confirmed, true);
+    assert.deepEqual(Object.keys(detection).sort(), ['events', 'kind', 'rule', 'source']);
+    assert.equal(detection.kind, 'definition');
     assert.deepEqual(detection.rule, { windowSeconds: 600, threshold: 120, reasonCode: 'burst_read' });
     assert.deepEqual(detection.rule, { ...DETECTION_RULE });
     assert.equal(detection.events.recorded, false);
+    assert.ok(!('confirmed' in detection));
     assert.deepEqual(notRun.map((item) => item.id), ['decision_results', 'detection_events', 'revocation_enforcement', 'policy_snapshot', 'attack_verdict']);
     assert.match(notRun.at(-1).text, /통과 근거가 아닙니다/u);
+    // 정책 전체가 코드와 같은지 직접 확인할 수 있게 현재 정책을 읽어 규칙 이름만 대조한다
+    assert.deepEqual(decider.ruleIds, describePolicy().ruleIds);
+    assert.ok(config.allowedRoutes.length > 0);
   } finally { w.done(); }
 });
 
@@ -221,8 +229,8 @@ test('한 표를 읽지 못하면 그 구역만 미확인이고 나머지는 확
       if (options.failTables?.includes('vault_devices')) { assert.equal(res.statusCode, 403); continue; }
       assert.equal(res.statusCode, 200, JSON.stringify(options));
       const { revocation, recovery, decider, detection } = res.body;
-      assert.equal(decider.confirmed, true);
-      assert.equal(detection.confirmed, true);
+      assert.equal(decider.kind, 'definition');
+      assert.equal(detection.kind, 'definition');
       assert.equal(revocation.confirmed, true);
       assert.equal(revocation.total, 5);
       if (options.failTables) {
@@ -249,7 +257,7 @@ test('한 표를 읽지 못하면 그 구역만 미확인이고 나머지는 확
   } finally { none.done(); }
 });
 
-test('기록이 읽기 한도를 넘으면 truncated로 알리고 가린 기록은 10건까지만 준다', async () => {
+test('기록이 읽기 한도를 넘으면 truncated로 알리고 총수와 가린 기록은 같은 100건이다', async () => {
   const tables = seed();
   for (let index = 0; index < 120; index += 1) {
     tables.vault_restore_audit.push({ id: 100 + index, note_id: `f${String(index).padStart(7, '0')}-0000-4000-8000-000000000099`, owner_id: USER_A,
@@ -260,9 +268,50 @@ test('기록이 읽기 한도를 넘으면 truncated로 알리고 가린 기록�
     const { restores } = (await asA(w)).body.recovery;
     assert.equal(restores.total, FETCH_LIMIT);
     assert.equal(restores.truncated, true);
+    assert.equal(restores.records.length, restores.total, '화면 수치와 가린 기록의 줄 수가 같다');
     assert.equal(restores.records.length, RECORD_LIMIT);
-    assert.equal(restores.records.length, 10);
+    assert.equal(RECORD_LIMIT, FETCH_LIMIT);
+    // 읽기 요청은 한도보다 1건 더 요청해 한도를 넘는지 알아낸다
+    assert.ok(w.calls.filter((call) => call.name === 'vault_restore_audit').every((call) => call.query.limit === String(FETCH_LIMIT + 1)));
   } finally { w.done(); }
+});
+
+test('기록 수가 0, 1, 10, 11, 14, 100, 101건이어도 총수, 상태별 수, 가린 기록 줄 수, 원본 행 수가 같다', async () => {
+  for (const extra of [0, 1, 10, 11, 14, 100, 101]) {
+    const tables = seed();
+    const mineApproved = tables.vault_devices.filter((row) => row.owner_id === USER_A && row.status === 'approved' && row.secret_sha256 === sha(COOKIE_APPROVED));
+    tables.vault_devices = [...mineApproved, ...tables.vault_devices.filter((row) => row.owner_id === USER_B)];
+    tables.vault_restore_audit = tables.vault_restore_audit.filter((row) => row.owner_id === USER_B);
+    tables.vault_notes_backup = [];
+    for (let index = 0; index < extra; index += 1) {
+      tables.vault_devices.push({ id: `e${String(index).padStart(7, '0')}-0000-4000-8000-000000000001`, owner_id: USER_A, secret_sha256: sha(`x${index}`),
+        status: ['pending', 'denied', 'revoked'][index % 3], request_code: 'ABCD2345', created_at: stamp(-index), decided_at: null, expires_at: stamp(index % 2 ? 10 : -10) });
+      tables.vault_restore_audit.push({ id: 1000 + index, note_id: `d${String(index).padStart(7, '0')}-0000-4000-8000-000000000002`, owner_id: USER_A,
+        content_sha256: hex('6'), outcome: 'restored', restored_at: stamp(-index) });
+      tables.vault_notes_backup.push({ id: `c${String(index).padStart(7, '0')}-0000-4000-8000-000000000003`, owner_id: USER_A, title: 'SECRET-T', content: 'SECRET-B',
+        content_sha256: hex('7'), backed_up_at: stamp(-index) });
+    }
+    const w = world({ tables });
+    try {
+      const { revocation, recovery } = (await asA(w)).body;
+      const rawDevices = tables.vault_devices.filter((row) => row.owner_id === USER_A).length;
+      const lists = [
+        ['기기', revocation, rawDevices],
+        ['사본', recovery.backups, extra],
+        ['복원', recovery.restores, extra],
+      ];
+      for (const [label, section, rawCount] of lists) {
+        const expectedTotal = Math.min(rawCount, FETCH_LIMIT);
+        assert.equal(section.total, expectedTotal, `${label} ${extra}: 총수`);
+        assert.equal(section.records.length, section.total, `${label} ${extra}: 가린 기록 줄 수`);
+        assert.equal(section.truncated, rawCount > FETCH_LIMIT, `${label} ${extra}: truncated`);
+      }
+      assert.equal(Object.values(revocation.counts).reduce((sum, value) => sum + value, 0), revocation.total, `기기 ${extra}: 상태별 수의 합`);
+      for (const state of Object.keys(revocation.counts)) {
+        assert.equal(revocation.counts[state], revocation.records.filter((record) => record.status === state).length, `기기 ${extra}: ${state}`);
+      }
+    } finally { w.done(); }
+  }
 });
 
 test('작전실은 로그인과 기기 승인을 요구한다: 승인 전·쿠키 없음·저장소 오류는 닫고 judge와 DEVICE_GATE=off는 통과한다', async () => {

@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -49,7 +49,8 @@ export async function runAttackChecks(config) {
   if (config.step === 5) return fifthStepChecks(config, app);
   if (config.step === 6) return sixthStepChecks(config, app);
   if (config.step === 7) return seventhStepChecks(config, app);
-  return eighthStepChecks(config, app);
+  if (config.step === 8) return eighthStepChecks(config, app);
+  return ninthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -342,6 +343,35 @@ async function eighthStepChecks(config, app) {
       observed: `로컬 가상 요청 연습: 자기 메모 ${own.decision}, 미등록 ${unregistered.decision}·${unregistered.reasonCode}, 복합 이상 ${asked.decision}, 재확인 뒤 ${confirmed.decision}, 메모 목록 ${list.decision}, 공지 쓰기 ${notice.decision}, 강사 자료 ${instructor.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다른 사람 메모의 거부는 자료 API 로컬 시험으로만 확인함. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행(제공 엔진의 새 로그인 시각 검증 계약을 확인하지 못함)` });
   } catch {
     results.push({ attackId: 'decider_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
+  }
+  return results;
+}
+
+// 9단계: 8단계 점검에, 탐지 함수(src/detect.mjs)에 가상 사건을 직접 넣어 본 결과 하나(detect_local)를 더합니다.
+// 직접 점검은 20개 이내여야 하므로 정확히 20개입니다. 로컬 연습이며 심판 판정이나 실제 회수가 아닙니다.
+// 제안은 반환값뿐이고 회수 API 호출이나 기기 권한 변경은 하지 않습니다. 실제 회수와 걸린 시간은 심판이 확인합니다.
+async function ninthStepChecks(config, app) {
+  const results = await eighthStepChecks(config, app);
+  const expected = '복합 의심(10분 120건 초과, 평소와 다른 네트워크, 확인된 기기 한 개)은 propose_revocation·burst_read와 대상, 정상 사건과 정상 기기는 observe여야 함';
+  try {
+    const { detect } = await import('./detect.mjs');
+    const start = Date.UTC(2026, 9, 1, 0, 0, 0);
+    const reads = (count, device, network) => Array.from({ length: count }, (_, index) => ({
+      at: new Date(start + index * 2000).toISOString(), method: 'GET', identity: { sub: 'local_subject' }, deviceId: device,
+      signals: { source: 'judge_fixture', network, region: 'local', hour: 14 } }));
+    const normalDevice = 'a'.repeat(16);
+    const suspectDevice = 'b'.repeat(16);
+    const normal = detect(reads(30, normalDevice, 'usual'));
+    const burstOnly = detect(reads(150, suspectDevice, 'usual'));
+    const mixed = detect([...reads(30, normalDevice, 'usual'), ...reads(150, suspectDevice, 'unusual')]);
+    const suspicious = detect(reads(150, suspectDevice, 'unusual'));
+    const ok = normal.action === 'observe' && burstOnly.action === 'observe'
+      && suspicious.action === 'propose_revocation' && suspicious.reasonCode === 'burst_read' && suspicious.device === suspectDevice
+      && mixed.action === 'propose_revocation' && mixed.device === suspectDevice;
+    results.push({ attackId: 'detect_local', expected,
+      observed: `로컬 가상 사건 연습: 정상 ${normal.action}, 다량 조회만 ${burstOnly.action}, 복합 의심 ${suspicious.action}·${suspicious.reasonCode ?? '-'}(대상 기기 ${suspicious.device ? '1개' : '없음'}), 정상 기기와 섞인 경우 ${mixed.action}(대상 기기 ${mixed.device === suspectDevice ? '의심 기기 1개' : '없음'}) (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 회수와 경과 시간은 심판이 확인하므로 미실행` });
+  } catch {
+    results.push({ attackId: 'detect_local', expected, observed: '탐지 함수를 불러오지 못해 확인하지 못함. 실제 회수와 경과 시간은 미실행' });
   }
   return results;
 }

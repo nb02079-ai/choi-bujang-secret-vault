@@ -6,10 +6,10 @@ import { checkDetection } from '../scripts/detect-test.mjs';
 const START = Date.UTC(2026, 9, 1, 0, 0, 0);
 const OBSERVE = { action: 'observe' };
 const DEVICE = 'a'.repeat(16);
-const revoke = (subject, device = DEVICE) => ({ action: 'propose_revocation', reasonCode: 'burst_read', subject, device });
+const revoke = (subject, device = DEVICE) => ({ action: 'propose_revocation', reasonCode: 'burst_read', subject, ...(device ? { device } : {}) });
 const reads = (count, { interval = 2, owner = 'learner_fixture', device = DEVICE, start = START, network, region, source = 'judge_fixture' } = {}) =>
   Array.from({ length: count }, (_, index) => ({
-    at: new Date(start + index * interval * 1000).toISOString(), method: 'GET', identity: { sub: owner }, deviceId: device,
+    at: new Date(start + index * interval * 1000).toISOString(), method: 'GET', identity: { sub: owner }, ...(device ? { deviceId: device } : {}),
     ...(network || region ? { signals: { source, network: network ?? 'usual', region: region ?? 'local', hour: 14 } } : {}),
   }));
 const unusualAt = (events, index) => events.map((event, i) => (i === index
@@ -21,9 +21,9 @@ test('복합 의심: 10분 안에 121건과 평소와 다른 네트워크가 함
   assert.deepEqual(detect(unusualAt(reads(121, { network: 'usual' }), 60)), revoke('learner_fixture'));
 });
 
-test('다량 조회만 있거나 네트워크만 이상하면 observe이다', () => {
+test('네트워크가 usual로 확인된 다량 조회나 다량이 아닌 이상 네트워크는 observe이다', () => {
   assert.deepEqual(detect(reads(121, { network: 'usual' })), OBSERVE);
-  assert.deepEqual(detect(reads(200)), OBSERVE);
+  assert.deepEqual(detect(reads(200, { network: 'usual' })), OBSERVE);
   assert.deepEqual(detect(reads(30, { network: 'unusual' })), OBSERVE);
   assert.deepEqual(detect(reads(120, { network: 'unusual' })), OBSERVE);
 });
@@ -66,12 +66,14 @@ test('제안은 다량 조회를 한 주체에게만 붙고 정상 주체는 유
   assert.deepEqual(detect(events.filter(event => event.identity.sub === 'normal_fixture')), OBSERVE);
 });
 
-test('출처가 judge_fixture가 아니거나 값이 틀리면 네트워크를 알 수 없음으로 두어 observe이다', () => {
-  assert.deepEqual(detect(reads(200, { network: 'unusual', source: 'none' })), OBSERVE);
-  assert.deepEqual(detect(reads(200, { network: 'unusual', source: 'browser' })), OBSERVE);
+test('출처가 judge_fixture가 아니거나 값이 틀리면 네트워크는 알 수 없음이고, 알 수 없음은 연습 계약대로 다량 조회만 본다', () => {
+  assert.deepEqual(detect(reads(200, { network: 'unusual', source: 'none' })), revoke('learner_fixture'));
+  assert.deepEqual(detect(reads(30, { network: 'unusual', source: 'browser' })), OBSERVE);
+  assert.deepEqual(detect(reads(200, { network: 'usual', source: 'judge_fixture' })), OBSERVE);
   const forged = reads(200).map(event => ({ ...event, network: 'unusual', headers: { 'x-network': 'unusual' },
     geo: { region: 'foreign' }, region: 'foreign', signals: { source: 'judge_fixture', network: 'weird' } }));
-  assert.deepEqual(detect(forged), OBSERVE);
+  assert.deepEqual(detect(forged), revoke('learner_fixture'));
+  assert.deepEqual(detect(forged.slice(0, 120)), OBSERVE);
   assert.equal(readDetectionEvents(forged).events[0].network, null);
 });
 
@@ -93,13 +95,14 @@ test('출력에는 주체·기기·사유 코드만 있고 비밀 값은 없다'
   const secret = ['sb', 'secret', 'e'.repeat(12)].join('_');
   const result = detect(reads(150, { network: 'unusual' }).map(event => ({ ...event, token: secret, body: '메모 내용 시험' })));
   assert.deepEqual(Object.keys(result).sort(), ['action', 'device', 'reasonCode', 'subject']);
+  assert.deepEqual(Object.keys(detect(reads(150, { device: null }))).sort(), ['action', 'reasonCode', 'subject']);
   assert.ok(!JSON.stringify(result).includes(secret));
 });
 
-test('연습 계약 runner: 네트워크 값이 없는 연습 사건 2건은 엄격 방식에서 확인 필요로 남는다', async () => {
+test('연습 계약 runner: 연습 사건 6건이 모두 통과한다', async () => {
   const results = await checkDetection(async events => detect(events));
-  const failed = results.filter(item => !item.passed).map(item => item.name).sort();
-  assert.deepEqual(failed, ['10분 안에 121건', '폭주 조회 200건']);
+  assert.equal(results.length, 6);
+  assert.deepEqual(results.filter(item => !item.passed), []);
 });
 
 const OTHER = 'b'.repeat(16);
@@ -121,10 +124,10 @@ test('평소와 다른 네트워크는 다량 조회를 한 같은 기기의 사
   assert.deepEqual(detect(events), OBSERVE);
 });
 
-test('확인된 기기가 없거나 형식이 틀리면 대상을 추측하지 않고 observe이다', () => {
+test('확인된 기기가 없거나 형식이 틀리면 기기를 추측하지 않고 주체만 담아 제안한다', () => {
   const base = reads(150, { network: 'unusual' });
   for (const deviceId of [undefined, null, '', 'abc', 'A'.repeat(16), 'g'.repeat(16), 'a'.repeat(17), 7, ['a'.repeat(16)]]) {
-    assert.deepEqual(detect(base.map(event => ({ ...event, deviceId }))), OBSERVE, String(deviceId));
+    assert.deepEqual(detect(base.map(event => ({ ...event, deviceId }))), revoke('learner_fixture', null), String(deviceId));
   }
 });
 
@@ -146,4 +149,14 @@ test('제안은 반환값뿐이다: 입력을 바꾸지 않고, 파일·네트�
   assert.equal(JSON.stringify(events), before);
   const source = (await import('node:fs')).readFileSync(new URL('../src/detect.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /\b(fetch|writeFile|appendFile|require|child_process|XMLHttpRequest)\b|^\s*import\s/mu);
+});
+
+test('기기 없는 사건과 기기 있는 사건은 서로 합산하지 않는다', () => {
+  const events = byTime([...reads(70, { device: null, network: 'unusual' }), ...reads(70, { device: DEVICE, network: 'unusual' })]);
+  assert.deepEqual(detect(events), OBSERVE);
+});
+
+test('구간에 평소와 다른 네트워크가 없고 usual과 알 수 없음이 섞이면 observe이다', () => {
+  const events = reads(150).map((event, index) => (index % 2 ? { ...event, signals: { source: 'judge_fixture', network: 'usual', region: 'local', hour: 14 } } : event));
+  assert.deepEqual(detect(events), OBSERVE);
 });

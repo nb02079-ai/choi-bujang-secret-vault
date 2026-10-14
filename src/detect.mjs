@@ -49,41 +49,48 @@ export function readDetectionEvents(events) {
 }
 
 // 탐지 규칙 하나(burst_read): 같은 (주체, 기기) 쌍의 GET이 10분 구간(시작 포함, 끝 제외)에서 120건을 넘고
-// 그 구간의 사건에 평소와 다른 네트워크가 함께 있을 때만 확인된 기기 한 개의 회수를 제안합니다.
-// 다량 조회만, 네트워크만, 지역만으로는 제안하지 않습니다. 다른 주체나 같은 계정의 다른 기기 사건은 합산하지 않으므로
-// 정상 기기는 유지됩니다. 확인된 기기(16자리 deviceId)가 없는 사건은 세지 않아 대상을 추측하지 않습니다.
+// 네트워크가 평소와 다르거나 그 구간에 네트워크 값이 하나도 없을 때(알 수 없음, 연습 계약과 같음) 회수를 제안합니다.
+// 구간에 네트워크 값이 있는데 모두 usual이면 제안하지 않아 정상 접속을 지킵니다. 지역은 읽지 않으므로
+// 지역 하나만으로 확정하지 않고, 다량 조회만 있어도 네트워크가 usual로 확인되면 제안하지 않습니다.
+// 다른 주체나 같은 계정의 다른 기기 사건은 합산하지 않으므로 정상 기기는 유지됩니다.
+// 확인된 기기(16자리 deviceId)가 있으면 결과에 기기 한 개를 담고, 없으면 기기를 추측하지 않고 device 없이 주체만 담습니다.
 // 이 함수는 제안만 반환합니다. 회수 실행, 회수 API 호출, 기기 권한 변경, 기록 쓰기는 하지 않으며
 // 실제 회수와 걸린 시간은 심판이 확인합니다. 기준(120건, 10분)은 docs/DETECT_EVENTS.md의 연습 계약을 따릅니다.
 const BURST_WINDOW_MS = 10 * 60 * 1000;
 const BURST_READ_MAX = 120;
 
-function burstWithUnusualNetwork(times) {
-  // times: 한 (주체, 기기) 쌍의 GET 사건을 시각 순으로 정렬한 [{ at, unusual }]
+function burstDetected(times) {
+  // times: 한 (주체, 기기) 쌍의 GET 사건을 시각 순으로 정렬한 [{ at, network }]
   let start = 0;
   let unusual = 0;
+  let known = 0;
   for (let end = 0; end < times.length; end += 1) {
-    if (times[end].unusual) unusual += 1;
+    if (times[end].network !== null) known += 1;
+    if (times[end].network === 'unusual') unusual += 1;
     while (times[end].at - times[start].at >= BURST_WINDOW_MS) {
-      if (times[start].unusual) unusual -= 1;
+      if (times[start].network !== null) known -= 1;
+      if (times[start].network === 'unusual') unusual -= 1;
       start += 1;
     }
-    if (end - start + 1 > BURST_READ_MAX && unusual > 0) return true;
+    if (end - start + 1 > BURST_READ_MAX && (unusual > 0 || known === 0)) return true;
   }
   return false;
 }
 
 export function detect(events) {
   const { events: read } = readDetectionEvents(events);
-  const byDevice = new Map();
+  const groups = new Map();
   for (const event of read) {
-    if (event.subject === null || event.device === null || event.kind !== 'GET' || event.at === null) continue;
+    if (event.subject === null || event.kind !== 'GET' || event.at === null) continue;
     const key = JSON.stringify([event.subject, event.device]);
-    if (!byDevice.has(key)) byDevice.set(key, { subject: event.subject, device: event.device, times: [] });
-    byDevice.get(key).times.push({ at: event.at, unusual: event.network === 'unusual' });
+    if (!groups.has(key)) groups.set(key, { subject: event.subject, device: event.device, times: [] });
+    groups.get(key).times.push({ at: event.at, network: event.network });
   }
-  for (const { subject, device, times } of byDevice.values()) {
-    if (burstWithUnusualNetwork(times.sort((a, b) => a.at - b.at))) {
-      return { action: 'propose_revocation', reasonCode: 'burst_read', subject, device };
+  for (const { subject, device, times } of groups.values()) {
+    if (burstDetected(times.sort((x, y) => x.at - y.at))) {
+      return device === null
+        ? { action: 'propose_revocation', reasonCode: 'burst_read', subject }
+        : { action: 'propose_revocation', reasonCode: 'burst_read', subject, device };
     }
   }
   return { action: 'observe' };

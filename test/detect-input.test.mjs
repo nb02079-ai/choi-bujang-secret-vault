@@ -91,7 +91,7 @@ test('결과는 원본 사건을 가리키지 않고 얼려 있다', () => {
   assert.equal(result.events[0].subject, 'learner_fixture');
 });
 
-test('네트워크 값이 없는 사건은 다량 조회여도 observe이다', () => {
-  assert.deepEqual(detect(reads(200)), { action: 'observe' });
+test('detect는 입력 정리를 거치고 정상 사건은 observe이다', () => {
+  assert.deepEqual(detect(reads(30)), { action: 'observe' });
   assert.throws(() => detect('x'), TypeError);
 });

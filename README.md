@@ -269,6 +269,74 @@
 - 10분 구간과 120건은 `docs/DETECT_EVENTS.md`의 연습 계약을 따른 기준입니다.
 - 8단계에서 적은 약점(화면의 메모 목록·추가 경로가 `allowedRoutes`에 없음, 공지·강사 자료 서버 경로 없음)은 그대로 남아 있습니다.
 
+## 10단계: 백업에서 자료실을 되살립니다
+
+**현재 작동하는 기능 (10단계 저장점):**
+- **정책 사본 비교:** `npm run policy:diff -- --snapshot <사본> --expect-sha256 <기대 지문>`은 침해 전에 검증한 안전 정책 사본과 현재 시험 정책의 차이만 보여 줍니다. 복원할 버전과 변경 범위를 먼저 보이고, 사본이 없거나 검증에 실패하면 아무것도 보이지 않고 중단합니다. 읽기만 합니다.
+- **시험 정책 복원:** `npm run policy:restore -- ... --only <항목>`은 `policy/test-policy.json`의 지정한 항목만 사본 값으로 되돌립니다. 처음에는 미리보기만 하고, 출력된 확인 토큰을 `--confirm`으로 넣어야 씁니다. 지정하지 않은 항목은 그대로 두고, 감사 이력 `policy/audit.log`에는 한 줄만 덧붙입니다. 심판이 판정하는 `src/decider.mjs`의 `decide()`는 바꾸지 않습니다.
+- **메모 한 건 복원:** 비공개 가상 메모 사본에서 지정한 한 건만 되살리는 경로가 있습니다.
+
+| 서비스 | 경로 | 방식 | 설정 위치 |
+|---|---|---|---|
+| 자료 API (`notes`) | `/api/notes/:id/restore` | `POST` | `aleph.config.json`의 `restoreRoute`와 `allowedRoutes`, 판정기 `POST /notes/:id/restore` |
+
+- **요청:** `Authorization: Bearer <로그인 토큰>`과 본문 `{ "contentSha256": "<사본의 내용 해시, 소문자 16진수 64자>" }`입니다. 메모 ID는 경로에 넣습니다. 본문과 쿼리, 헤더의 `role`·`owner_id`는 읽지 않고 이유 코드만 기록합니다.
+- **응답:** 성공은 `200 { id, restored: true, contentSha256 }`이며 메모 내용은 싣지 않습니다. 남의 사본, 사본 없음, 남의 현재 메모와 겹치는 경우, 잘못된 ID는 모두 같은 `404`입니다. 요청 해시가 사본과 다르거나 사본 내용이 저장된 해시와 다르면 `409`, 해시 형식이 틀리면 `400`, `POST`가 아니면 `405`, 로그인이 없으면 `401`입니다. 쓴 뒤 확인이나 감사 기록에 실패하면 이전 상태로 되돌리고 `500`입니다.
+- **대조 순서:** 로그인한 사용자와 사본의 `owner_id` 대조 → 사본 내용 해시 재계산 → 요청 해시와 대조 → 현재 행의 소유자 확인 → 해당 ID 한 건만 쓰기 → 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인 → 감사 표에 한 줄 추가. 다른 메모와 기존 감사 기록은 건드리지 않습니다.
+- **내용 해시:** 제목 바이트, `0x00`, 내용 바이트를 이어 붙인 값의 SHA-256(소문자 16진수)입니다. `src/notes-api.mjs`의 `contentSha256(title, content)`가 계산합니다.
+- **DB 표:** `vault_notes_backup`(사본: `id`, `owner_id`, `title`, `content`, `content_sha256`, `backed_up_at`)과 `vault_restore_audit`(감사: `note_id`, `owner_id`, `content_sha256`, `outcome`, `restored_at`, 제목·내용은 저장하지 않음)입니다. 생성 SQL은 로컬 `supabase/005_backup_restore.sql`(Git에 올리지 않음)이며 학생이 SQL Editor에서 직접 실행합니다. 두 표 모두 RLS를 켜고 `anon`·`authenticated` 권한을 회수하며, 감사 표는 서버 키의 수정·삭제 권한도 회수해 덧붙이기만 가능하게 합니다.
+- **제출 묶음 점검:** `npm run bundle`은 `restore_local` 점검 하나를 더합니다. 메모리 저장소와 가상 요청으로 B의 메모 한 건 복원(ID·소유자·내용 해시가 사본과 같은지), A의 요청과 틀린 해시의 거부, 정책 비교를 돌려 보며 심판 판정이 아닙니다. 직접 점검이 20개를 넘을 수 없어 9단계의 `detect_local` 결과는 `decider_local` 항목에 합쳤습니다(이름이 바뀐 점검: `detect_local`은 더 이상 따로 없음).
+- **허용 경로 변경:** `allowedRoutes`는 8단계의 3개에 이 경로를 더한 4개입니다. 판정기는 `POST /notes/:id/restore` 한 가지만 새로 허용하며, ID 자리의 `restore`(`/notes/restore`), 깊이가 다른 경로, 다른 방식은 계속 거부합니다.
+
+**확인 순서:**
+1. `node --test test/notes-restore.test.mjs`: 메모리 저장소로 시험 계정 B의 메모 한 건 복원을 확인합니다. 복원된 행의 ID·소유자·내용 해시가 사본과 같고, A의 메모와 B의 다른 메모, 기존 감사 기록이 그대로여야 합니다.
+2. `node --test test/*.test.mjs`: 전체 시험입니다.
+3. 실제 DB 확인(학생이 직접): ① `supabase/005_backup_restore.sql`을 실행해 두 표를 만듭니다. ② 파일 안의 예시 주석을 풀어 시험 계정 B의 메모 한 건을 사본으로 만듭니다. ③ 메모 내용을 바꿔 침해 상태를 만든 뒤 B로 로그인해 `POST /api/notes/<메모 id>/restore`를 사본 해시와 함께 보냅니다. ④ 원래 내용으로 돌아오고 감사 표에 한 줄이 생겼는지, A로 같은 요청을 보내면 `404`인지 봅니다. 로그인 토큰과 비밀값은 코드, Git, 채팅에 적지 않습니다.
+
+**기록 범위와 한계:**
+- 위 시험은 가짜 저장소로 하는 로컬 연습이며 심판 판정이나 실제 복원 증거가 아닙니다. 실제 DB에서의 복원과 B 계정 확인은 **미실행**입니다.
+- **미확인:** 심판이 복원 경로를 `restoreRoute`와 `allowedRoutes` 중 어디서 읽는지, 요청 본문 모양, 이유 코드, 판정기 허용 경로 추가가 심판 기준에 맞는지, `api/notes/[id]/restore.mjs`가 `api/notes/[id].mjs`와 함께 Vercel에 배포되는지 확인하지 못했습니다.
+- 사본을 만드는 시점과 기대 해시를 안전하게 전달하는 절차(침해 전에 해시를 따로 기록해 두는 일)는 이 코드에 없고 학생이 정해야 합니다.
+- 자료 전체 복원(여러 건 일괄)은 만들지 않았습니다. 이번 경로는 한 번에 한 건만 복원합니다.
+
+### 복구 뒤 1~9단계의 정상·금지 요청을 다시 확인하는 순서
+
+복구가 끝나면 **자료와 정책이 돌아왔는지**, **이전에 막던 요청이 다시 거부되는지**를 아래 순서로 봅니다. 결과 열에는 2026-10-14에 이 저장소에서 로컬로 실제 실행한 것만 적었고, 실행하지 않은 것은 모두 **미실행**입니다. 로컬 실행은 가짜 저장소와 가상 요청으로 하는 연습이며 심판 판정이나 실제 배포 증거가 아닙니다.
+
+**순서**
+1. **정책 차이 확인(읽기만):** `npm run policy:diff -- --snapshot <사본> --expect-sha256 <기대 지문>`을 실행해 복원할 버전과 변경 범위를 먼저 봅니다. 사본이 없거나 검증에 실패하면 여기서 멈춥니다.
+2. **시험 정책 복원:** `npm run policy:restore -- --snapshot <사본> --expect-sha256 <기대 지문> --only <항목,항목>`으로 미리보기를 보고, 바뀔 항목이 맞으면 출력된 토큰을 `--confirm`에 넣어 다시 실행합니다. 같은 미리보기를 한 번 더 실행했을 때 `바뀔 항목: 없음`이 나오면 정책이 돌아온 것입니다.
+3. **메모 한 건 복원:** `POST /api/notes/:id/restore`를 시험 계정 B의 로그인 토큰과 사본 해시로 요청합니다(순서는 위 "확인 순서" 3번). 응답이 `200`이고, 복원된 행의 ID·소유자·내용 해시가 사본과 같고, 감사 표에 한 줄이 늘고 기존 줄이 그대로이고, A의 메모와 B의 다른 메모가 그대로인지 봅니다.
+4. **로컬 시험 전체:** `node --test test/*.test.mjs`를 실행해 모든 시험이 통과하는지 봅니다. 아래 표의 단계별 시험도 여기에 포함됩니다.
+5. **연습 실행기:** `npm run decider:test`, `npm run fixture:7`, `npm run detect:test`를 실행해 기대 결과가 나오는지 봅니다.
+6. **직접 점검:** 변경을 커밋하고 푸시해 깨끗한 작업 트리가 된 뒤 `npm run bundle`을 실행합니다. 환경변수 `SUPABASE_PUBLISHABLE_KEY`가 있어야 anon 직접 요청 점검이 실행되고, 없으면 해당 항목은 `미실행`으로 남습니다.
+7. **배포 확인(학생이 직접):** 배포 반영 뒤 배포 주소에서 A·B 계정으로 아래 표의 "정상"과 "금지" 요청을 보냅니다. 토큰과 비밀값은 코드, Git, 채팅에 적지 않습니다.
+
+**단계별 정상·금지 요청**
+
+| 단계 | 정상 요청 (유지되어야 함) | 금지 요청 (다시 거부되어야 함) | 다시 실행하는 방법 | 2026-10-14 로컬 실행 결과 |
+|---|---|---|---|---|
+| 1 | 시작 틀의 가상 화면이 뜹니다. | 해당 없음. 1단계의 공개 자료 노출은 2단계에서 닫았습니다. | `npm run build -- --local` | 미실행 |
+| 2 | 로그인 뒤 서버 함수로 메모를 읽습니다. | 공개 `/data.json`의 `notes`가 비어 있고, 로그인 없는 `GET /api/notes`가 거부됩니다. | `npm run bundle`의 `static_data_json_empty`·`anonymous_list_rejected`, `node --test test/r5.test.mjs` | `test/r5.test.mjs` 18개 통과 (가짜 저장소). 배포 주소 요청은 미실행 |
+| 3 | A가 로그인해 메모를 추가·수정·삭제합니다. | 토큰 없음·가짜 토큰·위조 `userId`는 `401`, `PATCH`는 `405`입니다. | `npm run bundle`의 3단계 점검들, `node --test test/r5.test.mjs` | 위와 같은 18개 통과. 배포 주소 요청과 A 로그인 뒤 실제 추가·수정·삭제는 미실행 |
+| 4 | A와 B가 각자 자기 메모를 읽고 고칩니다. | B가 A의 메모를 읽거나 고치거나 지우면 `404`, 소유자 변경은 `403`, 공개 키로 Data API 직접 요청은 거부됩니다. | `node --test test/r5.test.mjs test/notes-owner-recheck.test.mjs`, A·B 계정 확인, anon 직접 요청 점검 | `test/notes-owner-recheck.test.mjs` 9개 통과 (가짜 저장소). A·B 실제 계정 확인(`cross_user_access`)과 anon 직접 요청은 미실행 |
+| 5 | 로그인·토큰 갱신·로그아웃이 서버 함수를 거칩니다. | 원본 자료 주소를 직접 부르면 거부되고, 첫 화면에 공개 키가 없고, 로그인 토큰을 실은 원본 직접 요청도 거부됩니다. | `npm run bundle`의 `original_url_no_notes`·`page_no_public_key`·`authenticated_direct_rejected` | 미실행 |
+| 6 | 등록한 기기의 가상 요청은 `allow`입니다. | 미등록 기기는 `deny`와 `device_not_registered`입니다. | `npm run decider:test` | 4줄 모두 `통과`, `test/decider-input.test.mjs` 8개 통과 |
+| 7 | 정상 접속은 `allow`, 다시 확인한 복합 이상 접속도 `allow`입니다. | 복합 이상 접속(새벽, 처음 보는 네트워크, 짧은 시간의 많은 읽기)은 `step_up`입니다. | `npm run fixture:7`, `npm run decider:test` | `정상 사건: allow`, `복합 이상 사건: step_up`, `test/decider-stepup.test.mjs` 11개 통과. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행 |
+| 8 | 자기 메모 한 건의 `GET`·`PUT`·`DELETE`와 반 공지 읽기는 `allow`입니다. | 공지 쓰기, 강사 자료, 메모 전체 목록, 알 수 없는 경로와 기능 이름은 `deny`이고, B가 A의 메모를 요청하면 `404`입니다. | `node --test test/decider-zones.test.mjs test/notes-owner-recheck.test.mjs` | `test/decider-zones.test.mjs` 14개 통과 |
+| 9 | 정상 조회(120건 이하, 서로 다른 사용자, 흩어진 조회)는 `observe`입니다. | 10분 구간에 120건을 넘는 복합 의심은 대상 기기와 이유 코드가 있는 `propose_revocation`입니다(제안만 하며 실제 회수는 심판이 확인). | `npm run detect:test`, `node --test test/detect-input.test.mjs test/detect-rule.test.mjs` | `detect:test` 6건 모두 `통과`, `test/detect-input.test.mjs` 8개와 `test/detect-rule.test.mjs` 19개 통과. 실제 회수와 걸린 시간은 미실행 |
+| 10 | 복원한 메모 한 건과 복원한 시험 정책이 사본과 같습니다. | 사본과 해시가 다르거나 남의 사본·남의 메모를 요청하면 복원되지 않습니다. | `node --test test/policy-diff.test.mjs test/policy-eval.test.mjs test/policy-restore.test.mjs test/notes-restore.test.mjs` | `policy-diff` 10개, `policy-eval` 5개, `policy-restore` 13개, `notes-restore` 11개 통과. 실제 DB 복원과 B 계정 확인은 미실행 |
+
+**전체 합계:** `node --test test/*.test.mjs`는 181개 중 181개 통과, 실패 0개, 건너뜀 0개였습니다(위 표의 단계별 숫자는 이 안에 겹쳐서 들어 있어 더하면 181이 되지 않습니다).
+
+**미실행 항목과 이유**
+- `npm run build -- --local`, `npm run bundle`: 이번 과정에서 실행하지 않았습니다. `npm run bundle`은 커밋하고 푸시한 깨끗한 작업 트리가 필요합니다.
+- 환경변수 `SUPABASE_PUBLISHABLE_KEY`가 필요한 anon 직접 요청과 원본 주소 점검.
+- A·B 실제 계정과 로그인 토큰이 필요한 항목(`cross_user_access`, 로그인 뒤 추가·수정·삭제, 로그인 토큰을 실은 원본 직접 요청).
+- 다시 로그인 전 실제 자료 차단, 재로그인 확인, 새 요청 허용: 제공 엔진의 새 로그인 시각 검증 계약을 찾지 못했습니다.
+- 실제 회수와 걸린 시간: 심판이 확인합니다.
+- 실제 DB에서의 메모 복원, `005_backup_restore.sql` 실행, 배포 반영 뒤 화면 확인.
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 비공개 설정값·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.

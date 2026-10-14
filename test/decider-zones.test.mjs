@@ -161,3 +161,24 @@ test('어떤 가상 요청에도 형식이 맞는 응답을 돌려주고 ruleIds
     assert.ok(result.ruleIds.length > 0 && result.ruleIds.every(id => RULE_IDS.includes(id)));
   }
 });
+
+test('복원 경로: POST /notes/:id/restore 한 가지만 허용하고, 그 밖의 복원·기능 경로는 거부한다', async () => {
+  const restore = path => make('notes', 'POST', '/notes/:id/restore', path);
+  for (const id of [UUID, 'demo', 'note-1']) {
+    const result = await decide(restore(`/notes/${id}/restore`));
+    assert.equal(result.decision, 'allow', id);
+    assert.equal(result.reasonCode, 'approved', id);
+  }
+  // ID 자리의 restore, 깊이가 다른 경로, 다른 방식·서비스는 거부한다.
+  for (const request of [
+    restore('/notes/restore'), restore('/notes//restore'), restore(`/notes/${UUID}/restore/extra`), restore(`/notes/${UUID}/export`),
+    restore('/notes/../restore'), restore(`/notes/export/restore`), restore(`/notes/${UUID}/Restore`),
+    make('notes', 'GET', '/notes/:id/restore', `/notes/${UUID}/restore`), make('notes', 'PUT', '/notes/:id/restore', `/notes/${UUID}/restore`),
+    make('notes', 'DELETE', '/notes/:id/restore', `/notes/${UUID}/restore`), make('notes', 'POST', '/notes/restore', '/notes/restore'),
+    make('notices', 'POST', '/notes/:id/restore', `/notes/${UUID}/restore`), make('notices', 'POST', '/notices/:id/restore', `/notices/${UUID}/restore`),
+    make('instructor', 'POST', '/notes/:id/restore', `/notes/${UUID}/restore`), make('constructor', 'POST', '/notes/:id/restore', `/notes/${UUID}/restore`),
+  ]) {
+    const result = await decide(request);
+    assert.equal(result.decision, 'deny', `${request.service} ${request.method} ${request.path}`);
+  }
+});

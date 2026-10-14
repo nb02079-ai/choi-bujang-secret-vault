@@ -1,5 +1,5 @@
 {
-  "step": 9,
+  "step": 10,
   "repoUrl": "https://github.com/nb02079-ai/choi-bujang-vault",
   "publicAppUrl": "https://choi-bujang-vault-nb02079-ai.vercel.app",
   "sampleMarker": "SAMPLE_NOTE_1",
@@ -12,8 +12,9 @@
   "allowedRoutes": [
     "GET /api/notes/:id",
     "PUT /api/notes/:id",
-    "DELETE /api/notes/:id"
+    "DELETE /api/notes/:id",
+    "POST /api/notes/:id/restore"
   ],
   "originalApiUrl": "https://hcaygyndhpfqrwlfbpqt.supabase.co/rest/v1/vault_notes",
-  "restoreRoute": null
+  "restoreRoute": "POST /api/notes/:id/restore"
 }

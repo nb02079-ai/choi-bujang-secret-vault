@@ -6,6 +6,7 @@
 // 모든 읽기·추가·수정·삭제는 본인 메모로 제한합니다. 검증된 사용자 ID와 DB 행의 owner_id를 비교하고,
 // 맞지 않으면 기본 거부합니다. 추가할 때 owner_id는 검증된 사용자 ID로만 저장합니다.
 // DB 쪽 GRANT·RLS는 이 파일이 아니라 별도 SQL로 둡니다.
+import { createHash } from 'node:crypto';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 
@@ -13,6 +14,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const TITLE_MAX = 100;
 const BODY_MAX = 2000;
 const TABLE = '/rest/v1/vault_notes';
+const BACKUP_TABLE = '/rest/v1/vault_notes_backup';
+const AUDIT_TABLE = '/rest/v1/vault_restore_audit';
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+
+// 10단계 내용 해시: 제목 바이트, 0x00, 내용 바이트를 이어 붙인 값의 SHA-256(소문자 16진수)입니다.
+// supabase/005_backup_restore.sql의 사본 생성 예시와 같은 값이 나옵니다.
+export const contentSha256 = (title, content) => createHash('sha256')
+  .update(Buffer.concat([Buffer.from(title, 'utf8'), Buffer.from([0]), Buffer.from(content, 'utf8')])).digest('hex');
 
 let verifier;
 const defaultVerify = (authorization) => {
@@ -60,6 +69,14 @@ function cleanFields(body) {
   return { title, content: text };
 }
 
+// /api/notes/:id/restore 에서는 ID가 끝에서 둘째 구간입니다.
+function restorePathId(req) {
+  let segments = [];
+  try { segments = new URL(req.url, 'http://local').pathname.split('/').filter(Boolean); } catch { /* use query */ }
+  const candidate = segments.at(-1) === 'restore' && UUID.test(segments.at(-2) ?? '') ? segments.at(-2) : req.query?.id;
+  return typeof candidate === 'string' && UUID.test(candidate) ? candidate.toLowerCase() : null;
+}
+
 function pathId(req) {
   let last;
   try { last = new URL(req.url, 'http://local').pathname.split('/').filter(Boolean).at(-1); } catch { /* use query */ }
@@ -68,8 +85,8 @@ function pathId(req) {
 }
 
 export function createNotesApi({ verify = defaultVerify, env = process.env, fetchImpl = fetch } = {}) {
-  const store = async (method, { query = {}, body, prefer } = {}) => {
-    const url = new URL(TABLE, env.SUPABASE_URL);
+  const store = async (method, { query = {}, body, prefer, table = TABLE } = {}) => {
+    const url = new URL(table, env.SUPABASE_URL);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
     const headers = { apikey: env.SUPABASE_SECRET_KEY, Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -221,7 +238,81 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
     }
   };
 
-  return { collection, item };
+  // 10단계 POST /api/notes/:id/restore : 비공개 사본에서 지정한 한 건만 되살립니다.
+  // 사본의 ID·소유자·내용 해시를 요청의 해시와 대조하고, 본인 사본·본인 메모에만 씁니다.
+  // 다른 메모는 건드리지 않고, 복원마다 감사 표에 한 줄을 덧붙입니다. 감사 기록이 실패하면 복원도 되돌립니다.
+  // 응답과 로그에는 메모 내용, 해시 원문, 토큰을 싣지 않습니다.
+  const restore = async (req, res) => {
+    const checked = await guard(req, res, ['POST']);
+    if (!checked) return undefined;
+    const { identity } = checked;
+    const notFound = (reason) => {
+      logDenied(reason, req);
+      return res.status(404).json({ error: '복원할 사본을 찾을 수 없습니다.' });
+    };
+    const conflict = (reason) => {
+      logDenied(reason, req);
+      return res.status(409).json({ error: '사본의 내용 해시가 맞지 않아 복원하지 않았습니다.' });
+    };
+    const id = restorePathId(req);
+    if (!id) return notFound('bad_id');
+    const body = readJsonBody(req);
+    if (claimedPrivilege(req, body)) logDenied('privilege_field_ignored', req);
+    const expected = body?.contentSha256;
+    if (typeof expected !== 'string' || !SHA256_HEX.test(expected)) {
+      return res.status(400).json({ error: 'contentSha256(소문자 16진수 64자)를 문자열로 보내 주세요.' });
+    }
+    const target = { select: 'id,title,content,owner_id', id: `eq.${id}`, limit: '1' };
+    let undo = null;
+    try {
+      const saved = await store('GET', { table: BACKUP_TABLE, query: { select: 'id,owner_id,title,content,content_sha256', id: `eq.${id}`, limit: '1' } });
+      if (!saved.ok) return storeFailed(res, saved.status);
+      const backup = saved.rows?.[0];
+      const verdict = authorize(identity, backup);
+      if (!verdict.allowed) return notFound(`backup_${verdict.reason}`);
+      if (String(backup.id).toLowerCase() !== id || typeof backup.title !== 'string' || typeof backup.content !== 'string'
+          || contentSha256(backup.title, backup.content) !== backup.content_sha256) return conflict('backup_invalid');
+      if (backup.content_sha256 !== expected) return conflict('hash_mismatch');
+
+      const current = await store('GET', { query: target });
+      if (!current.ok) return storeFailed(res, current.status);
+      const row = current.rows?.[0];
+      if (row && !authorize(identity, row).allowed) return notFound('target_not_owned');
+
+      let written;
+      if (row) {
+        undo = async () => store('PATCH', { query: { id: `eq.${id}`, owner_id: `eq.${identity.userId}` }, body: { title: row.title, content: row.content } });
+        written = await store('PATCH', { query: { select: 'id', id: `eq.${id}`, owner_id: `eq.${identity.userId}` },
+          body: { title: backup.title, content: backup.content }, prefer: 'return=representation' });
+      } else {
+        undo = async () => store('DELETE', { query: { id: `eq.${id}`, owner_id: `eq.${identity.userId}` } });
+        written = await store('POST', { query: { select: 'id' }, prefer: 'return=representation',
+          body: { id, owner_id: identity.userId, title: backup.title, content: backup.content } });
+      }
+      if (written.status === 409) { undo = null; return conflict('target_conflict'); }
+      if (!written.ok || !written.rows?.[0]) { undo = null; return row ? notFound('owner_changed') : storeFailed(res, written.status); }
+
+      // 쓴 뒤 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인합니다. 다르면 이전 상태로 되돌립니다.
+      const after = await store('GET', { query: target });
+      const now = after.rows?.[0];
+      const same = after.ok && now && String(now.id).toLowerCase() === id && authorize(identity, now).allowed
+        && typeof now.title === 'string' && typeof now.content === 'string'
+        && contentSha256(now.title, now.content) === backup.content_sha256;
+      if (!same) throw new Error('verify_failed');
+
+      const audit = await store('POST', { table: AUDIT_TABLE, prefer: 'return=minimal',
+        body: { note_id: id, owner_id: identity.userId, content_sha256: backup.content_sha256, outcome: 'restored' } });
+      if (!audit.ok) throw new Error('audit_failed');
+      undo = null;
+      return res.status(200).json({ id, restored: true, contentSha256: backup.content_sha256 });
+    } catch (error) {
+      if (undo) { try { await undo(); } catch { console.error('notes: 복원을 되돌리지 못함'); } }
+      console.error('notes: 복원 실패', error?.message === 'verify_failed' || error?.message === 'audit_failed' ? error.message : '저장소 오류');
+      return res.status(500).json({ error: '복원하지 못했습니다. 이전 상태를 유지했습니다.' });
+    }
+  };
+
+  return { collection, item, restore };
 }
 
 export const notesApi = createNotesApi();

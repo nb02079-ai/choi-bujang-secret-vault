@@ -6,3 +6,5 @@ node_modules/
 public/aleph.json
 supabase/
 xdr/alerts.log
+policy/test-policy.json
+policy/audit.log

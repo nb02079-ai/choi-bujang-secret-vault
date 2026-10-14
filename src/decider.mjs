@@ -69,7 +69,7 @@ const reverified = stepUp => stepUp !== null && typeof stepUp === 'object' && st
 // 새 이유 코드는 운영 등록부에 있는지 확인하지 못했습니다. 바꿀 때는 이 상수만 고칩니다.
 export const ZONE_REASON_CODES = Object.freeze({ route: 'route_not_allowed', zone: 'zone_forbidden' });
 const ZONE_ROUTES = Object.freeze({
-  notes: Object.freeze(['GET /notes/:id', 'PUT /notes/:id', 'DELETE /notes/:id']),
+  notes: Object.freeze(['GET /notes/:id', 'PUT /notes/:id', 'DELETE /notes/:id', 'POST /notes/:id/restore']),
   notices: Object.freeze(['GET /notices', 'GET /notices/:id']),
 });
 const WRITE_METHODS = Object.freeze(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -86,7 +86,7 @@ const safeId = value => typeof value === 'string' && value.length >= 1 && value.
 
 // route 모양과 path가 정확히 같을 때만 true입니다. 쿼리는 읽지 않습니다.
 function exactRoute(service, method, route, path) {
-  if (!ZONE_ROUTES[service]?.includes(route) || !route.startsWith(`${method} `)) return false;
+  if (!Object.hasOwn(ZONE_ROUTES, service) || !ZONE_ROUTES[service].includes(route) || !route.startsWith(`${method} `)) return false;
   const want = route.slice(method.length + 1).split('/');
   const have = path.split('/');
   return want.length === have.length
@@ -131,4 +131,18 @@ export async function decide(request) {
       : verdict('step_up', 'step_up_required', RULE_IDS[1]);
   }
   return verdict('allow', 'approved', RULE_IDS[0]);
+}
+
+// 10단계: 현재 정책의 읽기 전용 복사본입니다. 정책 사본과 비교할 때만 쓰며, 이 값을 바꿔도 판정에는 영향이 없습니다.
+export function describePolicy() {
+  const lists = map => Object.fromEntries(Object.entries(map).map(([name, list]) => [name, [...list]]));
+  return {
+    ruleIds: [...RULE_IDS],
+    reasonCodes: { ...ZONE_REASON_CODES, deviceNotRegistered: 'device_not_registered', approved: 'approved', stepUpRequired: 'step_up_required' },
+    zoneRoutes: lists(ZONE_ROUTES),
+    writeMethods: [...WRITE_METHODS],
+    functionNames: [...FUNCTION_NAMES],
+    stepUp: { oddHourMax: ODD_HOUR_MAX, burstWindowSeconds: BURST_WINDOW_SECONDS, burstCountMin: BURST_COUNT_MIN, maxAgeSeconds: STEP_UP_MAX_AGE_SECONDS },
+    trustedSources: [...TRUSTED_SOURCES],
+  };
 }

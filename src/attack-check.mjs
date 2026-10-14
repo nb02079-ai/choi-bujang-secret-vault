@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -50,7 +50,8 @@ export async function runAttackChecks(config) {
   if (config.step === 6) return sixthStepChecks(config, app);
   if (config.step === 7) return seventhStepChecks(config, app);
   if (config.step === 8) return eighthStepChecks(config, app);
-  return ninthStepChecks(config, app);
+  if (config.step === 9) return ninthStepChecks(config, app);
+  return tenthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -372,6 +373,75 @@ async function ninthStepChecks(config, app) {
       observed: `로컬 가상 사건 연습: 정상 ${normal.action}, 다량 조회만 ${burstOnly.action}, 복합 의심 ${suspicious.action}·${suspicious.reasonCode ?? '-'}(대상 기기 ${suspicious.device ? '1개' : '없음'}), 정상 기기와 섞인 경우 ${mixed.action}(대상 기기 ${mixed.device === suspectDevice ? '의심 기기 1개' : '없음'}) (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 회수와 경과 시간은 심판이 확인하므로 미실행` });
   } catch {
     results.push({ attackId: 'detect_local', expected, observed: '탐지 함수를 불러오지 못해 확인하지 못함. 실제 회수와 경과 시간은 미실행' });
+  }
+  return results;
+}
+
+// 10단계: 9단계 점검에, 메모 한 건 복원과 정책 비교를 메모리 저장소와 가상 요청으로 직접 해 본 결과 하나(restore_local)를 더합니다.
+// 직접 점검은 20개 이내여야 하므로 9단계의 detect_local 결과를 decider_local 항목에 합쳐 정확히 20개로 맞춥니다.
+// 네트워크 요청이 아닌 로컬 연습이며 심판 판정이 아닙니다. 실제 DB 복원과 B 계정 확인은 실행하지 않습니다.
+async function tenthStepChecks(config, app) {
+  const results = await ninthStepChecks(config, app);
+  const detectIndex = results.findIndex(item => item.attackId === 'detect_local');
+  const decider = results.find(item => item.attackId === 'decider_local');
+  if (detectIndex >= 0 && decider) {
+    decider.expected = `${decider.expected}. 탐지: ${results[detectIndex].expected}`;
+    decider.observed = `${decider.observed} 탐지 연습: ${results[detectIndex].observed}`;
+    results.splice(detectIndex, 1);
+  }
+  const expected = '시험 계정 B의 메모 한 건 복원은 사본과 ID·소유자·내용 해시가 같고 다른 메모와 감사 기록은 그대로, A의 요청과 틀린 해시는 거부, 사본과 같은 정책은 차이 없음';
+  const quiet = console.warn;
+  try {
+    const { createNotesApi, contentSha256 } = await import('./notes-api.mjs');
+    const { currentPolicy, diffPolicy } = await import('./policy-diff.mjs');
+    const [userA, userB] = ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'];
+    const [noteA, noteB] = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+    const original = { title: '로컬 연습 제목', content: '로컬 연습 내용' };
+    const hash = contentSha256(original.title, original.content);
+    const tables = {
+      vault_notes: [{ id: noteB, owner_id: userB, title: '침해된 제목', content: '침해된 내용' },
+        { id: noteA, owner_id: userA, title: 'A 제목', content: 'A 내용' }],
+      vault_notes_backup: [{ id: noteB, owner_id: userB, ...original, content_sha256: hash }],
+      vault_restore_audit: [],
+    };
+    const fetchImpl = async (url, init) => {
+      const rows = tables[url.pathname.split('/').pop()];
+      const query = Object.fromEntries(url.searchParams);
+      const eq = field => (query[field]?.startsWith('eq.') ? query[field].slice(3) : undefined);
+      const body = init.body ? JSON.parse(init.body) : undefined;
+      const hit = rows.filter(row => (eq('id') === undefined || row.id === eq('id')) && (eq('owner_id') === undefined || row.owner_id === eq('owner_id')));
+      const pick = row => (query.select ? Object.fromEntries(query.select.split(',').map(key => [key, row[key]])) : row);
+      if (init.method === 'PATCH') { hit.forEach(row => Object.assign(row, body)); return Response.json(hit.map(pick)); }
+      if (init.method === 'POST') { rows.push({ ...body }); return Response.json([pick({ ...body })], { status: 201 }); }
+      return Response.json(hit.map(pick));
+    };
+    const tokens = { 'Bearer a': { kind: 'student', userId: userA }, 'Bearer b': { kind: 'student', userId: userB } };
+    const api = createNotesApi({ verify: async authorization => tokens[authorization] ?? null, fetchImpl,
+      env: { SUPABASE_URL: 'https://local-practice.invalid', SUPABASE_SECRET_KEY: 'local-practice-only' } });
+    const ask = async (token, contentHash) => {
+      const res = { statusCode: 0, setHeader() {}, status(code) { this.statusCode = code; return this; }, json() { return this; } };
+      await api.restore({ method: 'POST', url: `/api/notes/${noteB}/restore`, headers: { authorization: `Bearer ${token}` }, body: { contentSha256: contentHash } }, res);
+      return res.statusCode;
+    };
+    console.warn = () => {};
+    const byA = await ask('a', hash);
+    const wrongHash = await ask('b', 'f'.repeat(64));
+    const othersBefore = JSON.stringify(tables.vault_notes[1]);
+    const restoredStatus = await ask('b', hash);
+    const row = tables.vault_notes.find(item => item.id === noteB);
+    const restoredOk = restoredStatus === 200 && row.owner_id === userB && contentSha256(row.title, row.content) === hash
+      && JSON.stringify(tables.vault_notes[1]) === othersBefore && tables.vault_restore_audit.length === 1;
+    const same = JSON.parse(JSON.stringify(currentPolicy()));
+    const breached = JSON.parse(JSON.stringify(currentPolicy()));
+    breached.zoneRoutes.notes.push('GET /notes');
+    const policyOk = diffPolicy(currentPolicy(), same).length === 0 && diffPolicy(breached, same).length === 1;
+    const ok = byA === 404 && wrongHash === 409 && restoredOk && policyOk;
+    results.push({ attackId: 'restore_local', expected,
+      observed: `로컬 복원 연습(메모리 저장소): A의 요청 ${byA}, 틀린 해시 ${wrongHash}, B의 복원 ${restoredStatus}(ID·소유자·내용 해시 ${restoredOk ? '사본과 같음' : '사본과 다름'}, 다른 메모 보존, 감사 기록 ${tables.vault_restore_audit.length}줄 추가), 정책 비교 ${policyOk ? '같은 정책은 차이 없음, 침해된 정책은 차이 1건' : '기대와 다름'} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 DB 복원, B 계정 확인, 사본 SQL 실행은 미실행` });
+  } catch {
+    results.push({ attackId: 'restore_local', expected, observed: '복원 연습을 불러오지 못해 확인하지 못함. 실제 DB 복원과 B 계정 확인은 미실행' });
+  } finally {
+    console.warn = quiet;
   }
   return results;
 }

@@ -303,7 +303,8 @@ test('allowedRoutes lists exactly the handler routes that the decider zone rules
   const { api, call, A } = await notesFixture();
   const id = '44444444-4444-4444-8444-444444444444';
   const accepted = [];
-  for (const [handler, path, shape] of [[api.collection, '/api/notes', '/api/notes'], [api.item, `/api/notes/${id}`, '/api/notes/:id']]) {
+  for (const [handler, path, shape] of [[api.collection, '/api/notes', '/api/notes'], [api.item, `/api/notes/${id}`, '/api/notes/:id'],
+    [api.restore, `/api/notes/${id}/restore`, '/api/notes/:id/restore']]) {
     for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']) {
       const res = await call(handler, method, { token: A, url: path, body: { title: 't', body: 'b' } });
       if (res.statusCode !== 405) accepted.push(`${method} ${shape}`);

@@ -385,8 +385,11 @@ async function tenthStepChecks(config, app) {
   const detectIndex = results.findIndex(item => item.attackId === 'detect_local');
   const decider = results.find(item => item.attackId === 'decider_local');
   if (detectIndex >= 0 && decider) {
-    decider.expected = `${decider.expected}. 탐지: ${results[detectIndex].expected}`;
-    decider.observed = `${decider.observed} 탐지 연습: ${results[detectIndex].observed}`;
+    // 제출 묶음은 expected·observed를 각각 300자 이하로 요구하므로 두 연습의 결과를 요약해서 합칩니다.
+    const same = item => item.observed.includes('(기대와 같음)');
+    const both = same(decider) && same(results[detectIndex]);
+    decider.expected = '판정기(기기·추가 확인·구역)와 탐지(10분 120건 초과 복합 의심은 propose_revocation, 정상 사건은 observe)가 기대대로 나와야 함';
+    decider.observed = `로컬 가상 요청 연습: 판정기 ${same(decider) ? '기대와 같음' : '기대와 다름'}, 탐지 ${same(results[detectIndex]) ? '기대와 같음' : '기대와 다름'} (${both ? '모두 기대와 같음' : '기대와 다른 항목 있음'}). 심판 판정이 아님. 다시 로그인 전 실제 자료 차단, 실제 회수와 경과 시간은 미실행`;
     results.splice(detectIndex, 1);
   }
   const expected = '시험 계정 B의 메모 한 건 복원은 사본과 ID·소유자·내용 해시가 같고 다른 메모와 감사 기록은 그대로, A의 요청과 틀린 해시는 거부, 사본과 같은 정책은 차이 없음';
@@ -437,7 +440,7 @@ async function tenthStepChecks(config, app) {
     const policyOk = diffPolicy(currentPolicy(), same).length === 0 && diffPolicy(breached, same).length === 1;
     const ok = byA === 404 && wrongHash === 409 && restoredOk && policyOk;
     results.push({ attackId: 'restore_local', expected,
-      observed: `로컬 복원 연습(메모리 저장소): A의 요청 ${byA}, 틀린 해시 ${wrongHash}, B의 복원 ${restoredStatus}(ID·소유자·내용 해시 ${restoredOk ? '사본과 같음' : '사본과 다름'}, 다른 메모 보존, 감사 기록 ${tables.vault_restore_audit.length}줄 추가), 정책 비교 ${policyOk ? '같은 정책은 차이 없음, 침해된 정책은 차이 1건' : '기대와 다름'} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 DB 복원, B 계정 확인, 사본 SQL 실행은 미실행` });
+      observed: `로컬 복원 연습(메모리 저장소): A의 요청 ${byA}, 틀린 해시 ${wrongHash}, B의 복원 ${restoredStatus}(ID·소유자·내용 해시 ${restoredOk ? '사본과 같음' : '사본과 다름'}, 감사 ${tables.vault_restore_audit.length}줄), 정책 비교 ${policyOk ? '정상' : '기대와 다름'} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 DB 복원과 B 계정 확인은 미실행` });
   } catch {
     results.push({ attackId: 'restore_local', expected, observed: '복원 연습을 불러오지 못해 확인하지 못함. 실제 DB 복원과 B 계정 확인은 미실행' });
   } finally {

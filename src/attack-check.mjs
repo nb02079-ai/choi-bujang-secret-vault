@@ -49,7 +49,7 @@ const send = (url, init = {}, attackId = '') => {
   // 우리 앱으로 보내는 요청에는 쿼리 attackId도 적습니다. Data API(/rest/)는 모르는 쿼리를 열 조건으로 읽으므로 붙이지 않습니다.
   const target = new URL(url);
   if (!target.pathname.startsWith('/rest/')) target.searchParams.set('attackId', attackId);
-  return fetch(target, { ...init, headers: { ...init.headers, 'x-attack-id': attackId }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  return fetch(target.href, { ...init, headers: { ...init.headers, 'x-attack-id': attackId }, redirect: 'error', signal: AbortSignal.timeout(10000) });
 };
 
 // 실행하지 않은 점검: observed는 정확히 not_run, 이유는 expected 끝에 적습니다.
@@ -125,7 +125,7 @@ async function staticDataCheck(app) {
           : count === null ? `/data.json을 읽었지만 notes 형식을 확인하지 못함 (HTTP ${response.status})`
             : `비로그인 /data.json에서 메모 ${count}건이 보임 (HTTP ${response.status})` };
   } catch {
-    return { attackId: 'static_data_json_empty', expected, observed: '요청이 실패해 확인하지 못함' };
+    return { attackId: 'static_data_json_empty', expected, observed: '미실행. 요청이 실패해 결과를 받지 못함' };
   }
 }
 
@@ -152,9 +152,9 @@ async function secondStepChecks(config, app) {
   } catch {
     results.push({ attackId: 'anonymous_api_read',
       expected: '비로그인 요청으로 /api/notes의 메모를 읽을 수 없어야 함 (2단계에서는 아직 막지 않은 약점)',
-      observed: '요청이 실패해 확인하지 못함' });
+      observed: '미실행. 요청이 실패해 결과를 받지 못함' });
     results.push({ attackId: 'api_response_no_key',
-      expected: '/api/notes 응답에 비공개 값 형태의 문자열이 없어야 함', observed: '요청이 실패해 확인하지 못함' });
+      expected: '/api/notes 응답에 비공개 값 형태의 문자열이 없어야 함', observed: '미실행. 요청이 실패해 결과를 받지 못함' });
   }
 
   results.push(notRun('api_post_rejected', '/api/notes에 GET이 아닌 요청을 보내면 거부(405)되어야 함', WRITE_REASON));
@@ -174,7 +174,7 @@ async function expectRejected(app, { attackId, expected, path, init = {}, status
       : `${statuses.join('/')}이 아닌 응답이 옴 (HTTP ${response.status})`;
     return { attackId, expected, observed: keyShown ? `${observed}. 응답에 비공개 값 형태의 문자열이 있음` : observed };
   } catch {
-    return { attackId, expected, observed: '요청이 실패해 확인하지 못함' };
+    return { attackId, expected, observed: '미실행. 요청이 실패해 결과를 받지 못함' };
   }
 }
 
@@ -279,7 +279,7 @@ async function fifthStepChecks(config, app) {
             : count === null ? `응답 형식을 확인하지 못함 (HTTP ${response.status})`
               : `원본 주소에서 메모가 보임 (HTTP ${response.status})` });
     } catch {
-      results.push({ attackId: 'original_url_no_notes', expected, observed: '요청이 실패해 확인하지 못함' });
+      results.push({ attackId: 'original_url_no_notes', expected, observed: '미실행. 요청이 실패해 결과를 받지 못함' });
     }
   }
   results.push(notRun('authenticated_direct_rejected', '로그인 토큰을 실어 원본 자료 주소를 직접 불러도 거부되어야 함', '로그인 토큰을 코드에 넣지 않으므로 실행하지 않음'));
@@ -440,6 +440,6 @@ async function pageKeyCheck(app) {
         : shown ? `첫 화면 코드에 접속값 형태의 문자열이 보임 (HTTP ${response.status})`
           : `첫 화면 코드에 접속값 형태의 문자열이 없음 (HTTP ${response.status})` };
   } catch {
-    return { attackId: 'page_no_public_key', expected, observed: '요청이 실패해 확인하지 못함' };
+    return { attackId: 'page_no_public_key', expected, observed: '미실행. 요청이 실패해 결과를 받지 못함' };
   }
 }

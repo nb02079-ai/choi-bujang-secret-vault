@@ -96,7 +96,7 @@ test('step 2 attack check records only requests it sent', async () => {
     globalThis.fetch = async () => { throw new Error('network'); };
     const failed = await runAttackChecks({ ...config, step: 2 });
     assert.equal(failed.length, 4);
-    assert.equal(failed.filter(item => /확인하지 못함/u.test(item.observed)).length, 3);
+    assert.equal(failed.filter(item => item.observed === 'not_run' && /요청이 실패해 결과를 받지 못함/u.test(item.expected)).length, 3);
     assert.equal(failed.find(item => item.attackId === 'api_post_rejected').observed, 'not_run');
   } finally {
     globalThis.fetch = originalFetch;
@@ -394,7 +394,7 @@ test('step 3 attack check sends tokenless requests and leaves account checks unr
 
     globalThis.fetch = async () => { throw new Error('network'); };
     const down = await runAttackChecks({ ...config, step: 3 });
-    assert.equal(down.filter(item => /확인하지 못함/u.test(item.observed)).length, 4);
+    assert.equal(down.filter(item => item.observed === 'not_run' && /요청이 실패해 결과를 받지 못함/u.test(item.expected)).length, 4);
   } finally {
     globalThis.fetch = originalFetch;
   }

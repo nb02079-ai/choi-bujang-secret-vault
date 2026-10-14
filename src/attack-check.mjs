@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -52,7 +52,8 @@ export async function runAttackChecks(config) {
   if (config.step === 8) return eighthStepChecks(config, app);
   if (config.step === 9) return ninthStepChecks(config, app);
   if (config.step === 10) return tenthStepChecks(config, app);
-  return eleventhStepChecks(config, app);
+  if (config.step === 11) return eleventhStepChecks(config, app);
+  return twelfthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -508,6 +509,64 @@ async function eleventhStepChecks(config, app) {
     decider.attackId = 'local_practice';
     decider.expected = '판정기·탐지, 메모 복원, 기기 승인 연습이 기대대로 나와야 함 (승인 전 자료 요청 403, 자기 승인 403, 승인 뒤 200)';
     decider.observed = `로컬 연습(가짜 저장소·가상 요청): 판정기·탐지 ${label(same(decider))}, 메모 복원 ${label(same(restore))}, 기기 승인 ${label(deviceOk)}. 심판 판정이 아님. 실제 DB 복원, 기기 승인 흐름, B 계정 확인, 실제 회수는 미실행`;
+  }
+  return results;
+}
+
+// 12단계: 11단계 점검의 local_practice 항목에, 작전실 요약과 1~11단계 재확인 표를 가짜 저장소로 직접 돌려 본 결과를 더합니다.
+// 직접 점검은 20개 이내이고 각 글은 300자 이하여야 하므로 새 항목을 만들지 않고 local_practice에 한 문장을 더합니다.
+// 로컬 연습이며 심판 판정이 아닙니다. 41종 공격 방어 여부는 목록과 심판 판정이 없어 이 점검에서 다루지 않습니다.
+async function twelfthStepChecks(config, app) {
+  const results = await eleventhStepChecks(config, app);
+  const quiet = console.warn;
+  let opsOk = false;
+  let recheckOk = false;
+  try {
+    console.warn = () => {};
+    const { createOpsApi } = await import('./ops-api.mjs');
+    const { createDeviceCheck, DEVICE_COOKIE } = await import('./device-api.mjs');
+    const { createHash, randomBytes, randomUUID } = await import('node:crypto');
+    const user = randomUUID();
+    const cookie = randomBytes(32).toString('base64url');
+    const tables = {
+      vault_devices: [{ id: randomUUID(), owner_id: user, secret_sha256: createHash('sha256').update(cookie).digest('hex'), status: 'approved', request_code: 'AAAA2222', created_at: new Date().toISOString(), decided_at: null, expires_at: null }],
+      vault_notes_backup: [], vault_restore_audit: [],
+    };
+    const fetchImpl = async (url) => {
+      const rows = tables[url.pathname.split('/').pop()] ?? [];
+      const query = Object.fromEntries(url.searchParams);
+      const filters = Object.entries(query).filter(([key, value]) => !['select', 'limit', 'order'].includes(key) && value.startsWith('eq.'));
+      const hit = rows.filter(row => filters.every(([key, value]) => String(row[key]) === value.slice(3)));
+      const columns = query.select?.split(',');
+      return Response.json(hit.map(row => (columns ? Object.fromEntries(columns.map(key => [key, row[key]])) : row)));
+    };
+    const env = { SUPABASE_URL: 'https://local-practice.invalid', SUPABASE_SECRET_KEY: 'local-practice-only' };
+    const verify = async authorization => (authorization === 'Bearer a' ? { kind: 'student', userId: user } : null);
+    const ops = createOpsApi({ verify, env, fetchImpl, deviceCheck: createDeviceCheck({ env, fetchImpl }) });
+    const ask = async (withCookie) => {
+      const res = { statusCode: 0, body: undefined, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
+      await ops.summary({ method: 'GET', url: '/api/ops/summary', headers: { authorization: 'Bearer a', ...(withCookie ? { cookie: `${DEVICE_COOKIE}=${cookie}` } : {}) } }, res);
+      return res;
+    };
+    const approved = await ask(true);
+    const unapproved = await ask(false);
+    opsOk = approved.statusCode === 200 && approved.body?.revocation?.total === 1 && approved.body?.revocation?.counts?.approved === 1
+      && approved.body?.recovery?.restores?.total === 0 && unapproved.statusCode === 403
+      && !JSON.stringify(approved.body).includes(cookie);
+    const { runRecheck } = await import('./recheck.mjs');
+    const recheck = await runRecheck();
+    recheckOk = recheck.summary.mismatch === 0 && recheck.summary.measured >= 40;
+  } catch {
+    opsOk = false;
+    recheckOk = false;
+  } finally {
+    console.warn = quiet;
+  }
+  const merged = results.find(item => item.attackId === 'local_practice');
+  if (merged) {
+    const label = ok => (ok ? '기대와 같음' : '기대와 다름');
+    merged.expected = `${merged.expected}. 작전실 요약(승인 기기 200, 미승인 403)과 재확인 표(불일치 0건)`;
+    merged.observed = merged.observed.replace('. 심판 판정이 아님', `, 작전실 요약 ${label(opsOk)}, 재확인 표 ${label(recheckOk)}. 심판 판정이 아님`);
   }
   return results;
 }

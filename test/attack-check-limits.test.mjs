@@ -38,6 +38,11 @@ test('10단계부터의 로컬 점검은 기대와 같고 미실행을 밝힌다
     for (const gone of ['decider_local', 'restore_local', 'detect_local']) assert.ok(!results.some(attempt => attempt.attackId === gone), gone);
     const merged = results.find(attempt => attempt.attackId === 'local_practice');
     assert.match(merged.observed, /판정기·탐지 기대와 같음, 메모 복원 기대와 같음, 기기 승인 기대와 같음/u);
+    // 12단계부터는 같은 항목에 작전실 요약과 재확인 표 결과도 들어 있다 (새 항목을 만들지 않고 20개 상한을 지킨다)
+    if (config.step >= 12) {
+      assert.match(merged.observed, /작전실 요약 기대와 같음, 재확인 표 기대와 같음\. 심판 판정이 아님/u);
+      assert.ok(merged.expected.length <= 300 && merged.observed.length <= 300);
+    }
   }
   for (const id of expectedIds) {
     const found = results.find(attempt => attempt.attackId === id);

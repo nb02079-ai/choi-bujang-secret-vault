@@ -95,7 +95,7 @@
 | 배포된 페이지에서 읽은 공개 anon 키로 Supabase Data API `GET`(목록·id 조건), `POST`(빈 본문), `PATCH`, `DELETE`(없는 id) | 5건 모두 HTTP 401, `42501` permission denied for table `vault_notes` |
 | 로그인 토큰 없이 `GET /api/notes` | HTTP 401 |
 
-`npm run bundle`의 `src/attack-check.mjs`가 위 anon 직접 요청과 3단계의 토큰 없는 요청(`GET`·`POST /api/notes`, `GET`·`PUT`·`DELETE /api/notes/:id`, 가짜 토큰, 위조 `x-user-id`·`owner_id`, `PATCH`)을 다시 보냅니다. anon 직접 요청에는 존재하지 않는 id 조건이나 필수 칸이 빠진 빈 본문만 써서, 권한이 잘못 열려 있어도 자료가 바뀌지 않게 했습니다.
+`npm run bundle`의 `src/attack-check.mjs`는 위 anon 직접 요청과 3단계의 토큰 없는 요청을 점검합니다. 당시에는 `GET`·`POST /api/notes`, `GET`·`PUT`·`DELETE /api/notes/:id`, 가짜 토큰, 위조 `x-user-id`·`owner_id`, `PATCH`를 모두 보냈습니다. **12단계부터는 읽기(`GET`)만 실제로 보내고, 쓰기 요청이 필요한 점검은 보내지 않고 `observed`를 `not_run`으로 남깁니다**(아래 12단계 "제출 묶음의 격리 환경 제약" 참고). anon 직접 요청에는 존재하지 않는 id 조건이나 필수 칸이 빠진 빈 본문만 써서, 권한이 잘못 열려 있어도 자료가 바뀌지 않게 했습니다(이 쓰기 요청들도 지금은 보내지 않습니다).
 
 **아직 확인하지 못했거나 실행하지 않은 것:**
 - 정상 A·B 로그인 뒤 실제 Supabase에서 각자 자기 메모를 읽고 추가·수정·삭제하는 것, B가 A의 메모를 읽거나 고치거나 지우려다 404·403으로 거부되는 것은 코드로 실행하지 않았습니다. 계정 정보를 코드에 넣지 않기 위해서이며, 서버의 소유자 비교는 로컬 시험(가짜 검사기·메모리 저장소)으로만 확인했습니다. 학생이 브라우저에서 직접 확인해야 합니다(`attack-check`의 `logged_in_own_crud`, `cross_user_access`는 미실행).
@@ -285,7 +285,7 @@
 - **대조 순서:** 로그인한 사용자와 사본의 `owner_id` 대조 → 사본 내용 해시 재계산 → 요청 해시와 대조 → 현재 행의 소유자 확인 → 해당 ID 한 건만 쓰기 → 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인 → 감사 표에 한 줄 추가. 다른 메모와 기존 감사 기록은 건드리지 않습니다.
 - **내용 해시:** 제목 바이트, `0x00`, 내용 바이트를 이어 붙인 값의 SHA-256(소문자 16진수)입니다. `src/notes-api.mjs`의 `contentSha256(title, content)`가 계산합니다.
 - **DB 표:** `vault_notes_backup`(사본: `id`, `owner_id`, `title`, `content`, `content_sha256`, `backed_up_at`)과 `vault_restore_audit`(감사: `note_id`, `owner_id`, `content_sha256`, `outcome`, `restored_at`, 제목·내용은 저장하지 않음)입니다. 생성 SQL은 로컬 `supabase/005_backup_restore.sql`(Git에 올리지 않음)이며 학생이 SQL Editor에서 직접 실행합니다. 두 표 모두 RLS를 켜고 `anon`·`authenticated` 권한을 회수하며, 감사 표는 서버 키의 수정·삭제 권한도 회수해 덧붙이기만 가능하게 합니다.
-- **제출 묶음 점검:** `npm run bundle`은 `restore_local` 점검 하나를 더합니다. 메모리 저장소와 가상 요청으로 B의 메모 한 건 복원(ID·소유자·내용 해시가 사본과 같은지), A의 요청과 틀린 해시의 거부, 정책 비교를 돌려 보며 심판 판정이 아닙니다. 직접 점검이 20개를 넘을 수 없어 9단계의 `detect_local` 결과는 `decider_local` 항목에 합쳤습니다(이름이 바뀐 점검: `detect_local`은 더 이상 따로 없음).
+- **제출 묶음 점검:** 10단계에는 `npm run bundle`에 메모 복원 연습(`restore_local`)을 넣었으나, 12단계에서 제출 묶음이 격리 환경 제약을 받게 되어 이 연습을 제출 묶음에서 뺐습니다. 메모 복원은 `node --test test/notes-restore.test.mjs`와 `npm run recheck`에서 계속 실측합니다.
 - **허용 경로 변경:** `allowedRoutes`는 8단계의 3개에 이 경로를 더한 4개입니다. 판정기는 `POST /notes/:id/restore` 한 가지만 새로 허용하며, ID 자리의 `restore`(`/notes/restore`), 깊이가 다른 경로, 다른 방식은 계속 거부합니다.
 
 **확인 순서:**
@@ -346,7 +346,7 @@
 - **승인 전에는 보호 자료가 없습니다.** 로그인한 뒤 서버가 `승인됨`이라고 알려 주기 전에는 메모 추가 화면이 숨겨지고 목록에는 안내 문구만 보이며, 자료 요청(`GET /api/notes` 등)도 보내지 않습니다. 서버도 자료 API(`/api/notes`, `/api/notes/:id`, `/api/notes/:id/restore`)에서 승인된 기기가 아니면 `403`(`device_not_approved`)을 돌려줍니다. 승인된 기기에서는 기존 화면과 응답이 그대로입니다.
 - **기기 키와 토큰은 브라우저 저장소에 넣지 않습니다.** 로그인 토큰은 화면 메모리에만 있고(새로고침하면 다시 로그인), `sessionStorage`·`localStorage`·`IndexedDB`를 쓰지 않습니다. 기기를 알아보는 값은 서버가 만든 `HttpOnly` 쿠키(`__Host-vault_device`, `Secure`, `SameSite=Strict`)이며 화면 스크립트는 읽을 수 없고, DB(`vault_devices`)에는 그 값의 SHA-256 해시만 저장합니다. 쿠키도 브라우저가 보관하는 값이므로, 카드의 "브라우저 저장소"에 쿠키까지 포함하는 해석이라면 이 방식은 맞지 않습니다.
 
-- **제출 묶음 점검:** `npm run bundle`은 단계 11로 만들어지며, 직접 점검 20개 상한과 글자 수 300자 상한 때문에 판정기·탐지, 메모 복원, 기기 승인 연습 결과를 `local_practice` 한 항목에 합칩니다(이전의 `decider_local`, `restore_local`은 따로 없음). 이 항목은 가짜 저장소와 가상 요청으로 승인 전 자료 요청 `403`, 자기 승인 `403`, 승인 뒤 `200`을 확인하며 심판 판정이 아닙니다.
+- **제출 묶음 점검:** 11단계에는 판정기·탐지, 메모 복원, 기기 승인 연습을 `local_practice` 한 항목에 합쳤으나, 12단계에서 격리 환경 제약에 맞춰 이 항목을 판정기·탐지·정책 비교 세 가지로 줄였습니다. 기기 승인 연습(승인 전 자료 요청 `403`, 자기 승인 `403`, 승인 뒤 `200`)은 `node --test test/device-api.test.mjs`와 `npm run recheck`에서 계속 실측합니다.
 
 **기기 승인 흐름** (`src/device-api.mjs`, 자료 API가 아니라서 `allowedRoutes`와 `RULE_IDS`는 바꾸지 않았습니다)
 
@@ -425,7 +425,10 @@ npm run recheck -- --deployed https://배포주소 --out 저장폴더
 - **일치 여부는 코드가 비교합니다.** 기대 문구와 실제 문구가 같으면 `일치`, 다르거나 오류·요청 실패이면 `불일치`입니다. 금지 요청은 응답 코드뿐 아니라 거부된 뒤에 저장소가 바뀌지 않았는지(`저장소 변화 없음`)까지 실측합니다. 불일치가 하나라도 있으면 종료 코드가 `1`입니다.
 - **미실행은 통과가 아닙니다.** 실행하지 않은 요청은 실제 결과·요청 ID·확인 시각을 `-`로 두고 이유를 적습니다. 대상: 공개 접속값(`SUPABASE_PUBLISHABLE_KEY`)이 필요한 Data API·원본 주소 직접 요청, 로그인 토큰이 필요한 A·B 실제 계정 요청과 교차 접근, 실제 Supabase Auth 로그인, 다시 로그인 전 실제 자료 차단, 실제 회수 집행, 실제 DB 복원, 실제 브라우저의 두 기기 승인 흐름, 그리고 `--deployed`를 주지 않았을 때의 배포 요청입니다.
 - **41종 공격은 통과로 처리하지 않습니다.** 목록과 심판 판정이 없어 표 맨 아래에 `선언 41종 · 목록 0건 · 실측 0건 · 미실행 41종`으로만 적습니다. 목록이 생기면 이 도구를 확장해 같은 방식으로 실측해야 합니다.
-- `npm run bundle`의 직접 점검은 12단계에서도 19개입니다. 작전실 요약(승인된 기기 `200`, 미승인 `403`)과 재확인 표(불일치 0건)의 로컬 결과는 새 항목 없이 `local_practice` 한 항목에 한 문장으로 합쳤고, 심판 판정이 아니라고 명시합니다.
+- **제출 묶음의 격리 환경 제약 (심판 안내 S12_BUNDLE_UNSUPPORTED):** 심판은 `npm run bundle`을 격리 환경에서 실행하며, 그곳에서는 `node:fs`·`node:path`·`node:url`·`node:child_process`(git 읽기)·`node:crypto`만 쓸 수 있고 npm 패키지는 쓸 수 없으며, 요청은 공개 HTTPS 주소로 보내는 `GET`·`HEAD`만 됩니다. 처음 만든 12단계 점검은 로컬 연습을 위해 `notes-api`, `device-api`, `ops-api`, `recheck`를 불러왔고 이 모듈들이 `verify-login.mjs`를 거쳐 `node:net`, `@supabase/supabase-js`, `jose`를 불러왔으며, 3·4단계의 쓰기 요청 점검이 `POST`·`PUT`·`PATCH`·`DELETE`를 보냈습니다.
+  - **고친 내용:** `src/attack-check.mjs`는 이제 `decider.mjs`, `detect.mjs`, `policy-diff.mjs`와 허용된 내장 모듈만 불러오고, `GET`·`HEAD`가 아닌 요청은 보내려 하면 오류가 나게 막았습니다. 쓰기 요청이 필요한 점검 8개(`anonymous_create_rejected`, `anonymous_update_rejected`, `anonymous_delete_rejected`, `forged_identity_rejected`, `unsupported_method_rejected`, `anon_direct_create_rejected`, `anon_direct_update_rejected`, `anon_direct_delete_rejected`)와 계정이나 공개 접속값이 필요해 실행하지 않은 점검은 모두 `observed`가 정확히 `not_run`이고 이유는 `expected` 끝에 적습니다. 점검 이름은 그대로입니다.
+  - **직접 점검은 12단계에서도 19개입니다.** `local_practice` 한 항목은 판정기, 탐지, 정책 비교 연습의 로컬 결과만 담고(심판 판정이 아님) 메모 복원·기기 승인·작전실 연습은 제외했다고 밝힙니다. 제외한 연습은 `node --test`와 `npm run recheck`에서 계속 실측합니다.
+  - **시험:** `test/bundle-isolation.test.mjs`가 단계 1~12의 점검을 모듈 불러오기 추적을 켠 자식 프로세스에서 실제로 실행해, 불러온 모듈이 허용된 것뿐인지, 보낸 요청이 모두 `GET`·`HEAD`인지, 쓰기 점검이 `not_run`인지, 결과가 제출 묶음 기준을 지키는지 확인합니다. 이전 커밋 `0cf6d4c`에 같은 추적을 돌리면 심판이 지적한 `node:net`, `@supabase/supabase-js`, `jose`, `POST`·`PUT`·`DELETE`·`PATCH`가 그대로 재현되고 지금 코드에서는 나오지 않음을 확인했습니다.
 - 결과는 화면에 표로 찍히고 `artifacts/recheck/`(Git 제외)에 `recheck-날짜시각.md`와 `.json`으로 저장됩니다. 표에는 토큰, 쿠키 값, 해시 원문, 저장소 키, 메모 본문이 없습니다.
 
 **마지막 실행 결과 (2026-10-14, 이 환경):**
@@ -553,7 +556,7 @@ revoke update, delete, truncate on table public.vault_restore_audit from service
 | `npm run policy:diff`, `npm run policy:restore` | 정책 사본 비교와 복원(복구 절 참고) | 아래 복구 절 |
 | `npm run bundle` | 제출 묶음 만들기 | 단계, 커밋, 규칙 수, 직접 점검 수 |
 
-- **`npm run bundle`의 조건:** 커밋하지 않은 파일이 없어야 하고, Git 설정의 `origin`이 `aleph.config.json`의 `repoUrl`과 같은 GitHub 주소여야 하며, Git 제외 파일 `bundle-notes.json`이 있어야 합니다. 그래서 로컬 경로로 받은 사본에서는 실행하지 않았습니다. 이 명령은 비밀값 패턴(개인키 머리글, `sb_secret_`, `sk-`, JWT 형태, `Bearer` 토큰)이 있으면 실패하고, 단계·커밋·규칙 이름·허용 경로·점검 결과만 묶습니다.
+- **`npm run bundle`의 조건:** 커밋하지 않은 파일이 없어야 하고, Git 설정의 `origin`이 `aleph.config.json`의 `repoUrl`과 같은 GitHub 주소여야 하며, Git 제외 파일 `bundle-notes.json`이 있어야 합니다. 그래서 로컬 경로로 받은 사본에서는 실행하지 않았습니다. 이 명령은 비밀값 패턴(개인키 머리글, `sb_secret_`, `sk-`, JWT 형태, `Bearer` 토큰)이 있으면 실패하고, 단계·커밋·규칙 이름·허용 경로·점검 결과만 묶습니다. 심판이 격리 환경에서 실행할 때를 위해 이 명령은 허용된 내장 모듈과 저장소의 `decider`·`detect`·`policy-diff`만 불러오고 `GET`·`HEAD` 요청만 보냅니다. 쓰기 요청이 필요한 점검과 실행하지 않은 점검은 `observed`가 `not_run`입니다.
 - **접속 앱과 자료실:** 배포 주소를 브라우저로 엽니다. 로그인하고 기기 승인을 받은 뒤에만 메모 화면과 탈환 작전실이 열립니다. 앱 설치는 브라우저 메뉴의 앱 설치를 쓰고, 설치했다는 표시는 기기 승인과 별개입니다. 서버 함수를 로컬에서 띄우는 명령은 만들지 않았습니다(Vercel 명령줄 도구가 필요하고 설치하지 않기로 했습니다).
 
 ### 중지

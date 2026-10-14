@@ -104,6 +104,6 @@ test('respond: log write failures keep the block and forged log lines are imposs
 test('the decider and the other module are untouched', () => {
   const decider = read('../src/decider.mjs');
   assert.doesNotMatch(decider, /respond|webinjection|xdr/u);
-  assert.match(decider, /RULE_IDS = Object\.freeze\(\['device_registered', 'step_up_required'\]\)/u);
+  assert.match(decider, /RULE_IDS = Object\.freeze\(\['device_registered', 'step_up_required', 'zone_route_exact', 'zone_notice_read_only', 'zone_instructor_denied'\]\)/u);
   assert.doesNotMatch(read('../xdr/brute-force/decide.mjs'), /web-injection|webinjection/u);
 });

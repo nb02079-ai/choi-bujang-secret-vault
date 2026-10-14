@@ -9,7 +9,7 @@ const withSignals = (request, patch) => fresh(request, { signals: { ...request.s
 const burst = count => [{ kind: 'risk_signal', ageSeconds: 60, count }];
 
 test('규칙 이름: 기기 규칙을 유지하고 step_up_required를 더한다', () => {
-  assert.deepEqual([...RULE_IDS], ['device_registered', 'step_up_required']);
+  assert.deepEqual([...RULE_IDS].slice(0, 2), ['device_registered', 'step_up_required']);
 });
 
 test('정상 사건은 허용이다', async () => {

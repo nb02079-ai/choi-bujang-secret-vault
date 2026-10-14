@@ -274,7 +274,7 @@ async function sixthStepChecks(config, app) {
   const expected = '등록 기기의 가상 요청은 allow, 미등록 기기의 가상 요청은 deny·device_not_registered여야 함';
   try {
     const { decide } = await import('./decider.mjs');
-    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', route: 'GET /notes/:id' };
+    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', path: '/notes/demo', route: 'GET /notes/:id' };
     const registered = await decide({ ...base, requestId: 'local-registered', deviceRegistered: true });
     const unregistered = await decide({ ...base, requestId: 'local-unregistered', deviceRegistered: false });
     const ok = registered.decision === 'allow'
@@ -294,7 +294,7 @@ async function seventhStepChecks(config, app) {
   const expected = '복합 이상 가상 사건은 step_up·step_up_required, 재확인이 붙은 같은 사건과 정상 사건은 allow여야 함';
   try {
     const { decide } = await import('./decider.mjs');
-    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', route: 'GET /notes/:id',
+    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', path: '/notes/demo', route: 'GET /notes/:id',
       deviceRegistered: true, stepUp: { verified: false, authAgeSeconds: null }, recentEvents: [] };
     const normal = await decide({ ...base, requestId: 'local-normal',
       signals: { source: 'judge_fixture', region: 'local', network: 'usual', hour: 14 } });

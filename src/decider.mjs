@@ -1,7 +1,7 @@
 // ALEPH SDP 엔진이 확인한 요청만 받는 학생 판정기 시작점입니다.
-// 6단계부터 규칙을 하나씩 추가합니다. 지금은 device_registered, step_up_required 두 규칙을 구현했습니다.
+// 6단계부터 규칙을 하나씩 추가합니다. 지금은 기기, 추가 확인, 구역 규칙(zone_*)을 구현했습니다.
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
-export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required']);
+export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required', 'zone_route_exact', 'zone_notice_read_only', 'zone_instructor_denied']);
 
 // 7-1단계 입력 검사: 엔진이 넘긴 signals·recentEvents만 읽고, 없거나 출처가 불명확하면 null(알 수 없음)로 둡니다.
 // 정상값(local, usual 등)으로 채우지 않습니다. headers, geo 같은 계약 밖 이름은 읽지 않습니다.
@@ -63,6 +63,49 @@ const reverified = stepUp => stepUp !== null && typeof stepUp === 'object' && st
   && Number.isInteger(stepUp.authAgeSeconds) && stepUp.authAgeSeconds >= 0
   && stepUp.authAgeSeconds <= STEP_UP_MAX_AGE_SECONDS;
 
+// 8단계 구역 규칙: 서비스와 route·path의 정확한 모양으로 메모·반 공지·강사 자료를 나눕니다.
+// 역할은 요청에 없으므로 쓰지 않습니다. 강사의 공지 수정은 판정기가 아니라 서버의 관리 경로에서 처리합니다.
+// 메모 주인 비교는 판정기에서 하지 않고 자료 API(src/notes-api.mjs)에서 합니다.
+// 새 이유 코드는 운영 등록부에 있는지 확인하지 못했습니다. 바꿀 때는 이 상수만 고칩니다.
+export const ZONE_REASON_CODES = Object.freeze({ route: 'route_not_allowed', zone: 'zone_forbidden' });
+const ZONE_ROUTES = Object.freeze({
+  notes: Object.freeze(['GET /notes/:id', 'PUT /notes/:id', 'DELETE /notes/:id']),
+  notices: Object.freeze(['GET /notices', 'GET /notices/:id']),
+});
+const WRITE_METHODS = Object.freeze(['POST', 'PUT', 'PATCH', 'DELETE']);
+// :id와 같은 깊이에서 기능을 고르는 이름은 자료 ID로 받지 않습니다. ID 형식(UUID 여부)은 좁히지 않습니다.
+const FUNCTION_NAMES = Object.freeze(['export', 'import', 'search', 'list', 'all', 'new', 'bulk']);
+const safeId = value => typeof value === 'string' && value.length >= 1 && value.length <= 128
+  && !/[/?#\\%\s\u0000-\u001f\u007f]/u.test(value) && value !== '.' && value !== '..'
+  && !FUNCTION_NAMES.includes(value.toLowerCase());
+
+// route 모양과 path가 정확히 같을 때만 true입니다. 쿼리는 읽지 않습니다.
+function exactRoute(service, method, route, path) {
+  if (!ZONE_ROUTES[service]?.includes(route) || !route.startsWith(`${method} `)) return false;
+  const want = route.slice(method.length + 1).split('/');
+  const have = path.split('/');
+  return want.length === have.length
+    && want.every((part, index) => (part === ':id' ? safeId(have[index]) : part === have[index]));
+}
+
+// 구역에서 거부할 때만 { reasonCode, ruleId }를 돌려주고, 통과하면 null을 돌려줍니다.
+export function checkZone(request) {
+  const text = value => (typeof value === 'string' ? value : '');
+  const service = text(request?.service);
+  const method = text(request?.method);
+  const route = text(request?.route);
+  const path = text(request?.path);
+  const first = path.split('/')[1] ?? '';
+  if (service === 'instructor' || first === 'instructor') {
+    return { reasonCode: ZONE_REASON_CODES.zone, ruleId: RULE_IDS[4] };
+  }
+  if ((service === 'notices' || first === 'notices') && WRITE_METHODS.includes(method)) {
+    return { reasonCode: ZONE_REASON_CODES.zone, ruleId: RULE_IDS[3] };
+  }
+  return exactRoute(service, method, route, path) ? null
+    : { reasonCode: ZONE_REASON_CODES.route, ruleId: RULE_IDS[2] };
+}
+
 export async function decide(request) {
   // 6단계 device_registered: 엔진이 확인한 deviceRegistered가 true일 때만 허용합니다.
   // false, 값 없음, 그 밖의 값은 모두 미등록으로 보고 거부합니다.
@@ -75,6 +118,8 @@ export async function decide(request) {
     ruleIds: [ruleId],
   });
   if (!registered) return verdict('deny', 'device_not_registered', RULE_IDS[0]);
+  const zone = checkZone(request);
+  if (zone) return verdict('deny', zone.reasonCode, zone.ruleId);
   if (explainStepUp(request).matched) {
     return reverified(request.stepUp)
       ? verdict('allow', 'approved', RULE_IDS[1])

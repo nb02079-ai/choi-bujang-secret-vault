@@ -296,7 +296,8 @@ test('notes api limits read, add, edit and delete to the verified owner', async 
   assert.equal((await call(api.item, 'DELETE', { token: B, url: `/api/notes/${b1}` })).statusCode, 200);
 });
 
-test('allowedRoutes lists exactly the routes the handlers accept', async () => {
+// 8단계부터 allowedRoutes는 핸들러가 받는 경로 가운데 판정기가 허용하는 경로만 적습니다.
+test('allowedRoutes lists exactly the handler routes that the decider zone rules allow', async () => {
   const { readFileSync } = await import('node:fs');
   const real = JSON.parse(readFileSync(new URL('../aleph.config.json', import.meta.url), 'utf8'));
   const { api, call, A } = await notesFixture();
@@ -308,7 +309,14 @@ test('allowedRoutes lists exactly the routes the handlers accept', async () => {
       if (res.statusCode !== 405) accepted.push(`${method} ${shape}`);
     }
   }
-  assert.deepEqual([...accepted].sort(), [...real.allowedRoutes].sort());
+  const { checkZone } = await import('../src/decider.mjs');
+  const allowedByDecider = accepted.filter((entry) => {
+    const [method, shape] = entry.split(' ');
+    const route = shape.replace(/^\/api/u, '');
+    return checkZone({ service: 'notes', method, route: `${method} ${route}`, path: route.replace(':id', id) }) === null;
+  });
+  assert.ok(real.allowedRoutes.every((entry) => accepted.includes(entry)), '핸들러가 받지 않는 경로를 적지 않음');
+  assert.deepEqual([...allowedByDecider].sort(), [...real.allowedRoutes].sort());
 });
 
 test('notes api reports server setup problems without leaking the key', async () => {

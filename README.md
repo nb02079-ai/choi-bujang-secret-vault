@@ -233,7 +233,7 @@
 
 **현재 작동하는 기능 (판정기 구역 규칙 세 개 추가, 6·7단계 규칙 유지):**
 - 판정 순서: 기기 미등록 `deny` → 구역 `deny` → 복합 이상 `step_up` → `allow`. 규칙 이름은 `RULE_IDS`의 `device_registered`, `step_up_required`, `zone_route_exact`, `zone_notice_read_only`, `zone_instructor_denied`입니다. 판정기는 `service`, `method`, `route`, `path`만 읽고 쿼리와 역할 값은 읽지 않습니다.
-- 내 메모(`notes`): `GET`·`PUT`·`DELETE /notes/:id`만 허용합니다. 메모 전체 목록과 추가(`/notes`), ID가 빈 경로, 깊이가 다른 경로, `..`·`%`·공백이 든 ID, `export`·`import`·`search`·`list`·`all`·`new`·`bulk` 같은 기능 이름은 `deny`(이유 코드 `route_not_allowed`)입니다. 심판의 가상 요청은 메모 ID가 UUID가 아닐 수 있으므로 ID 형식은 UUID로 좁히지 않습니다.
+- 내 메모(`notes`): `GET`·`PUT`·`DELETE /notes/:id`만 허용합니다. 메모 전체 목록과 추가(`/notes`), ID가 빈 경로, 깊이가 다른 경로, `..`·`%`·공백이 든 ID, `export`·`search`·`all`·`mine`·`shared`·`recent`·`admin`·`download` 등 기능 이름 32개(`src/decider.mjs`의 `FUNCTION_NAMES`)는 `deny`(이유 코드 `route_not_allowed`)입니다. 심판의 가상 요청은 메모 ID가 UUID가 아닐 수 있으므로 ID 형식은 UUID로 좁히지 않습니다.
 - 반 공지(`notices`): `GET /notices`, `GET /notices/:id`만 허용합니다. `POST`·`PUT`·`PATCH`·`DELETE`는 누구에게나 `deny`(`zone_forbidden`)입니다. 판정기 요청에는 역할이 없으므로 강사의 공지 수정은 판정기가 아니라 서버의 관리 경로에서 처리해야 합니다. 이 관리 경로는 아직 없습니다.
 - 강사 자료(`instructor`): 모든 방식과 경로를 `deny`(`zone_forbidden`)합니다. 서비스 이름을 바꿔 경로 첫 칸만 `instructor`로 속여도 거부합니다. 알 수 없는 서비스, 경로, 방식도 거부합니다.
 - 자료 API(`src/notes-api.mjs`)의 소유자 재대조: 검증된 사용자 ID(`student` 또는 `judge`)와 저장된 `owner_id`를 다시 비교합니다. 남의 메모, 주인 없는 메모, 없는 메모는 모두 같은 404이고, 본문이 다른 `owner_id`를 내세우면 쓰기 전에 403입니다. 강사 권한을 저장하는 곳이 없어서 강사 권한은 항상 거부합니다. 화면 메뉴, 요청 본문, 쿼리, 헤더의 `role`·`owner_id`는 무시하고 이유 코드만 로그에 남깁니다. 로그에는 ID, 토큰, 본문을 싣지 않습니다.

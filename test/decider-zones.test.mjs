@@ -97,6 +97,21 @@ test('경로 변조와 기능 이름은 ID로 받지 않는다', async () => {
   await expectDeny(make('notes', 'GET', '/notes/:id', '/notes/a/../b'), ZONE_REASON_CODES.route, 'zone_route_exact', '이중 경로');
 });
 
+test('ID와 같은 깊이의 기능 이름은 모두 거부하고 일반 ID는 계속 허용한다', async () => {
+  const names = ['me', 'mine', 'my', 'own', 'public', 'shared', 'share', 'everyone', 'users', 'user',
+    'recent', 'latest', 'count', 'stats', 'summary', 'index', 'root',
+    'admin', 'download', 'upload', 'backup', 'dump', 'sync', 'restore', 'batch', 'ADMIN', 'Shared'];
+  for (const name of names) {
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      await expectDeny(make('notes', method, '/notes/:id', `/notes/${name}`), ZONE_REASON_CODES.route, 'zone_route_exact', `${method} ${name}`);
+    }
+    await expectDeny(make('notices', 'GET', '/notices/:id', `/notices/${name}`), ZONE_REASON_CODES.route, 'zone_route_exact', `공지 ${name}`);
+  }
+  for (const id of ['demo', 'note-1', 'meeting', 'adminx', 'my-note', UUID]) {
+    assert.equal((await decide(make('notes', 'GET', '/notes/:id', `/notes/${id}`))).decision, 'allow', id);
+  }
+});
+
 test('쿼리는 판정에 영향을 주지 않는다', async () => {
   const base = make('notes', 'GET', '/notes/:id', '/notes/demo');
   for (const patch of [{ queryLength: 0 }, { queryLength: 50 }, { queryLength: 9999, querySha256: 'f'.repeat(64) }]) {

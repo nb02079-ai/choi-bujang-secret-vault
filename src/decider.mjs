@@ -74,7 +74,12 @@ const ZONE_ROUTES = Object.freeze({
 });
 const WRITE_METHODS = Object.freeze(['POST', 'PUT', 'PATCH', 'DELETE']);
 // :id와 같은 깊이에서 기능을 고르는 이름은 자료 ID로 받지 않습니다. ID 형식(UUID 여부)은 좁히지 않습니다.
-const FUNCTION_NAMES = Object.freeze(['export', 'import', 'search', 'list', 'all', 'new', 'bulk']);
+const FUNCTION_NAMES = Object.freeze([
+  'export', 'import', 'search', 'list', 'all', 'new', 'bulk',
+  'me', 'mine', 'my', 'own', 'public', 'shared', 'share', 'everyone', 'users', 'user',
+  'recent', 'latest', 'count', 'stats', 'summary', 'index', 'root',
+  'admin', 'download', 'upload', 'backup', 'dump', 'sync', 'restore', 'batch',
+]);
 const safeId = value => typeof value === 'string' && value.length >= 1 && value.length <= 128
   && !/[/?#\\%\s\u0000-\u001f\u007f]/u.test(value) && value !== '.' && value !== '..'
   && !FUNCTION_NAMES.includes(value.toLowerCase());

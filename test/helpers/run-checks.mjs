@@ -6,14 +6,16 @@ import { pathToFileURL } from 'node:url';
 
 const [, , root, outFile] = process.argv;
 const requests = [];
+let currentStep = 0;
 globalThis.fetch = async (url, init = {}) => {
-  requests.push({ method: String(init.method ?? 'GET').toUpperCase(), url: String(url) });
+  requests.push({ step: currentStep, method: String(init.method ?? 'GET').toUpperCase(), url: String(url), attackId: init.headers?.['x-attack-id'] ?? null });
   return new Response('{}', { status: 401 });
 };
 const { runAttackChecks } = await import(pathToFileURL(join(root, 'src', 'attack-check.mjs')).href);
 const config = JSON.parse(readFileSync(join(root, 'aleph.config.json'), 'utf8'));
 const steps = {};
 for (let step = 1; step <= 12; step += 1) {
+  currentStep = step;
   steps[step] = await runAttackChecks({ ...config, step });
 }
 writeFileSync(outFile, JSON.stringify({ requests, steps }));

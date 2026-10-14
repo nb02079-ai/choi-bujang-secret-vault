@@ -26,7 +26,7 @@ test('현재 단계의 직접 점검 결과는 제출 묶음 기준(1~20개, 세
   assert.ok(!ids.has('detect_local') || config.step === 9, '10단계부터 detect_local은 decider_local에 합쳐 있음');
 });
 
-test('10단계부터의 로컬 연습은 local_practice 한 항목에 합쳐 기대와 같고 제외한 연습을 밝힌다', async () => {
+test('10단계부터의 로컬 연습은 local_practice 한 항목에 합치고 요청을 보내지 않으므로 not_run으로 적는다', async () => {
   const config = JSON.parse(readFileSync(new URL('../aleph.config.json', import.meta.url), 'utf8'));
   if (config.step < 10) return;
   const blocked = mock.method(globalThis, 'fetch', async () => { throw new Error('network_blocked'); });
@@ -35,11 +35,7 @@ test('10단계부터의 로컬 연습은 local_practice 한 항목에 합쳐 기
   for (const gone of ['decider_local', 'detect_local', 'restore_local']) assert.ok(!results.some((attempt) => attempt.attackId === gone), gone);
   const merged = results.find((attempt) => attempt.attackId === 'local_practice');
   assert.ok(merged, 'local_practice');
-  // 격리 환경에서는 메모 복원·기기 승인·작전실 연습을 불러올 수 없어 판정기·탐지·정책 비교 세 가지만 넣는다
-  assert.match(merged.observed, /판정기 기대와 같음, 탐지 기대와 같음, 정책 비교 기대와 같음./u);
-  assert.doesNotMatch(merged.observed, /기대와 다름/u);
-  assert.match(merged.observed, /심판 판정이 아님/u);
-  assert.match(merged.observed, /메모 복원·기기 승인·작전실 연습은 격리 환경에서 불러올 수 없어 제외/u);
-  assert.match(merged.observed, /미실행/u);
-  assert.ok(merged.expected.length <= 300 && merged.observed.length <= 300);
+  assert.equal(merged.observed, 'not_run');
+  assert.match(merged.expected, /로컬 연습이라 요청을 보내지 않음. 결과는 npm run recheck와 node --test에서 확인\)$/u);
+  assert.ok(merged.expected.length <= 300);
 });

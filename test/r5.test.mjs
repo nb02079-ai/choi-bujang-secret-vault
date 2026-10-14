@@ -65,16 +65,19 @@ test('deployment identity keeps the configured step', () => {
 test('step 2 attack check records only requests it sent', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
+  const headers = [];
   try {
     globalThis.fetch = async (url, init = {}) => {
       const path = new URL(String(url)).pathname;
       calls.push(`${init.method ?? 'GET'} ${path}`);
+      headers.push(init.headers?.['x-attack-id']);
       if (path === '/data.json') return Response.json({ notes: [] });
       if (init.method === 'POST') return new Response('no', { status: 405 });
       return Response.json({ notes: [{ title: 'a', content: 'b' }] });
     };
     const results = await runAttackChecks({ ...config, step: 2 });
-    assert.deepEqual(calls, ['GET /data.json', 'GET /api/notes'], '12단계부터 쓰기 요청(POST)은 보내지 않는다');
+    assert.deepEqual(calls, ['GET /data.json', 'GET /api/notes', 'GET /api/notes'], '12단계부터 쓰기 요청(POST)은 보내지 않는다');
+    assert.deepEqual(headers, ['static_data_json_empty', 'anonymous_api_read', 'api_response_no_key'], '요청마다 x-attack-id를 적는다');
     const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
     assert.match(byId.static_data_json_empty, /비어 있고/u);
     assert.match(byId.anonymous_api_read, /1건이 읽힘/u);

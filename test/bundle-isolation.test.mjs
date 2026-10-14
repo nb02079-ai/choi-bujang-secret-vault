@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const NODE_ALLOWED = new Set(['node:fs', 'node:path', 'node:url', 'node:child_process', 'node:crypto']);
 const RELATIVE_ALLOWED = new Set(['./decider.mjs', './detect.mjs', './policy-diff.mjs']);
+const KEY_LOOKUP = new Set(['anon_direct_read_rejected', 'original_url_no_notes']);
 const WRITE_CHECKS = ['anonymous_create_rejected', 'anonymous_update_rejected', 'anonymous_delete_rejected', 'forged_identity_rejected',
   'unsupported_method_rejected', 'anon_direct_create_rejected', 'anon_direct_update_rejected', 'anon_direct_delete_rejected'];
 
@@ -63,6 +64,28 @@ test('보낸 요청은 모두 공개 HTTPS 주소로 보내는 GET·HEAD이다 (
   for (const request of outcome.requests) {
     assert.ok(['GET', 'HEAD'].includes(request.method), `${request.method} ${request.url}`);
     assert.ok(request.url.startsWith('https://'), request.url);
+  }
+});
+
+test('요청을 보낸 점검은 모두 x-attack-id로 자기 attackId를 남기고, 요청 없는 점검은 not_run이다 (모든 단계)', () => {
+  for (const [step, results] of Object.entries(outcome.steps)) {
+    const sent = outcome.requests.filter((request) => request.step === Number(step));
+    const sentIds = new Set(sent.map((request) => request.attackId));
+    const resultIds = new Set(results.map((attempt) => attempt.attackId));
+    for (const request of sent) {
+      assert.match(request.attackId ?? '', /^[a-z0-9_]{1,60}$/u, `${step}단계 ${request.url}: x-attack-id가 없다`);
+      assert.ok(resultIds.has(request.attackId), `${step}단계 ${request.attackId}: 결과에 없는 attackId로 요청을 보냈다`);
+    }
+    for (const attempt of results) {
+      // 공개 접속값을 찾으려고 첫 화면을 읽는 요청은 그 점검의 attackId로 적으므로, 값을 못 찾아 not_run인 두 점검은 요청 기록이 있을 수 있다
+      if (attempt.observed === 'not_run' && !KEY_LOOKUP.has(attempt.attackId)) assert.ok(!sentIds.has(attempt.attackId), `${step}단계 ${attempt.attackId}: 요청을 보냈는데 not_run이다`);
+      if (attempt.observed !== 'not_run') assert.ok(sentIds.has(attempt.attackId), `${step}단계 ${attempt.attackId}: 요청 기록이 없는데 not_run이 아니다`);
+    }
+  }
+  const last = Object.fromEntries(outcome.steps[12].map((attempt) => [attempt.attackId, attempt.observed]));
+  assert.equal(last.local_practice, 'not_run');
+  for (const id of ['static_data_json_empty', 'anonymous_list_rejected', 'anonymous_get_one_rejected', 'forged_token_rejected', 'page_no_public_key']) {
+    assert.notEqual(last[id], 'not_run', id);
   }
 });
 

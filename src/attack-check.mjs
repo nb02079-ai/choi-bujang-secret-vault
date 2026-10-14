@@ -9,6 +9,7 @@
 // - 네트워크 요청은 공개 HTTPS 주소로 보내는 GET·HEAD뿐입니다. 쓰기 요청(POST·PUT·PATCH·DELETE)이 필요한 점검은
 //   보내지 않고 observed를 not_run으로 둡니다. 이유는 expected 끝에 적습니다.
 // - 실행하지 않은 점검은 모두 observed가 정확히 not_run입니다. 통과로 바꾸지 않습니다.
+// - 요청을 보내는 점검은 요청마다 x-attack-id 헤더에 자기 attackId를 적습니다. 요청을 보내지 않는 로컬 연습은 not_run입니다.
 // 메모 복원, 기기 승인, 작전실의 로컬 연습은 npm run recheck와 node --test에서 실행합니다.
 //
 // 키 모양 탐지 패턴은 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
@@ -39,10 +40,13 @@ function publicApp(config) {
 }
 
 // 요청은 GET·HEAD만 보냅니다. 다른 방식이 들어오면 보내지 않고 오류를 냅니다.
-const send = (url, init = {}) => {
+// 요청마다 x-attack-id 헤더에 그 요청이 속한 점검의 attackId를 적습니다. attackId가 없으면 보내지 않습니다.
+const ATTACK_ID = /^[a-z0-9_]{1,60}$/u;
+const send = (url, init = {}, attackId = '') => {
   const method = String(init.method ?? 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') throw new Error('write_request_not_allowed');
-  return fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  if (!ATTACK_ID.test(attackId)) throw new Error('attack_id_required');
+  return fetch(url, { ...init, headers: { ...init.headers, 'x-attack-id': attackId }, redirect: 'error', signal: AbortSignal.timeout(10000) });
 };
 
 // 실행하지 않은 점검: observed는 정확히 not_run, 이유는 expected 끝에 적습니다.
@@ -59,6 +63,10 @@ async function readJson(response) {
 // 결과를 한 번 더 정리합니다. 옛 문장 "미실행. 이유"가 남아 있으면 not_run으로 바꾸고 글자 수 상한을 지킵니다.
 function finalize(results) {
   return results.map((item) => {
+    if (item.local === true) {
+      const reason = '로컬 연습이라 요청을 보내지 않음. 결과는 npm run recheck와 node --test에서 확인';
+      return { attackId: item.attackId, expected: `${String(item.expected).slice(0, MAX_TEXT - reason.length - 3)} (${reason})`, observed: NOT_RUN };
+    }
     if (typeof item.observed === 'string' && item.observed.startsWith('미실행')) {
       const reason = item.observed.replace(/^미실행\.?\s*/u, '');
       return { attackId: item.attackId, expected: `${item.expected} (${reason})`.slice(0, MAX_TEXT), observed: NOT_RUN };
@@ -90,7 +98,7 @@ function dispatch(config, app) {
 }
 
 async function firstStepChecks(config, app) {
-  const response = await send(new URL('/data.json', app));
+  const response = await send(new URL('/data.json', app), {}, 'anonymous_note_read');
   let visible = false;
   if (response.ok) {
     const data = await readJson(response);
@@ -104,7 +112,7 @@ async function firstStepChecks(config, app) {
 async function staticDataCheck(app) {
   const expected = '공개 /data.json에는 가상 메모와 시작 틀 확인 표시가 없어야 함';
   try {
-    const response = await send(new URL('/data.json', app));
+    const response = await send(new URL('/data.json', app), {}, 'static_data_json_empty');
     const data = response.ok ? await readJson(response) : null;
     const count = Array.isArray(data?.notes) ? data.notes.length : null;
     const markerShown = data !== null && typeof data === 'object' && 'sampleMarker' in data;
@@ -124,7 +132,7 @@ async function secondStepChecks(config, app) {
   results.push(await staticDataCheck(app));
 
   try {
-    const response = await send(new URL('/api/notes', app));
+    const response = await send(new URL('/api/notes', app), {}, 'anonymous_api_read');
     const text = await response.text();
     let data = null;
     try { data = JSON.parse(text); } catch { /* not JSON */ }
@@ -133,9 +141,11 @@ async function secondStepChecks(config, app) {
       expected: '비로그인 요청으로 /api/notes의 메모를 읽을 수 없어야 함 (2단계에서는 아직 막지 않은 약점)',
       observed: count > 0 ? `비로그인 요청에서 메모 ${count}건이 읽힘 (HTTP ${response.status})`
         : `비로그인 요청에서 메모가 읽히지 않음 (HTTP ${response.status})` });
+    // 이 점검의 요청은 따로 보내 x-attack-id가 api_response_no_key로 남게 합니다.
+    const keyText = await (await send(new URL('/api/notes', app), {}, 'api_response_no_key')).text();
     results.push({ attackId: 'api_response_no_key',
       expected: '/api/notes 응답에 비공개 값 형태의 문자열이 없어야 함',
-      observed: KEY_SHAPE.test(text) ? '응답에 비공개 값 형태의 문자열이 있음' : '응답에 비공개 값 형태의 문자열이 없음' });
+      observed: KEY_SHAPE.test(keyText) ? '응답에 비공개 값 형태의 문자열이 있음' : '응답에 비공개 값 형태의 문자열이 없음' });
   } catch {
     results.push({ attackId: 'anonymous_api_read',
       expected: '비로그인 요청으로 /api/notes의 메모를 읽을 수 없어야 함 (2단계에서는 아직 막지 않은 약점)',
@@ -154,7 +164,7 @@ const SAMPLE_ID = '00000000-0000-4000-8000-000000000000';
 
 async function expectRejected(app, { attackId, expected, path, init = {}, status = 401, statuses = [status], scanForKey = false }) {
   try {
-    const response = await send(new URL(path, app), init);
+    const response = await send(new URL(path, app), init, attackId);
     const text = await response.text();
     const keyShown = scanForKey && KEY_SHAPE.test(text);
     const observed = statuses.includes(response.status) ? `거부됨 (HTTP ${response.status})`
@@ -195,11 +205,11 @@ async function thirdStepChecks(app) {
 // 접두사는 실행할 때 조립해 저장소 파일에 키 형태 글자가 남지 않게 합니다.
 const PUBLIC_ACCESS_PREFIX = ['sb', ['publi', 'shable'].join(''), ''].join('_');
 const PUBLIC_ACCESS_VALUE = `${PUBLIC_ACCESS_PREFIX}[A-Za-z0-9_-]{10,}`;
-async function readPublicAccessValue(app) {
+async function readPublicAccessValue(app, attackId) {
   const fromEnv = process.env.SUPABASE_PUBLISHABLE_KEY;
   if (typeof fromEnv === 'string' && new RegExp(`^${PUBLIC_ACCESS_VALUE}$`, 'u').test(fromEnv)) return fromEnv;
   try {
-    const page = await (await send(app)).text();
+    const page = await (await send(app, {}, attackId)).text();
     return new RegExp(PUBLIC_ACCESS_VALUE, 'u').exec(page)?.[0] ?? null;
   } catch {
     return null;
@@ -216,7 +226,7 @@ async function anonDirectChecks(app, dataApi) {
   const kept = (await thirdStepChecks(app))
     .filter(item => !['logged_in_crud', 'cross_user_access'].includes(item.attackId));
 
-  const key = dataApi ? await readPublicAccessValue(app) : null;
+  const key = dataApi ? await readPublicAccessValue(app, 'anon_direct_read_rejected') : null;
   if (!dataApi || !key) {
     kept.push(notRun('anon_direct_read_rejected', '공개 접속값으로 Data API에 직접 목록을 읽으면 거부되어야 함',
       '직접 요청에 쓸 공개 접속값(터미널 환경변수 또는 배포된 페이지)이나 Data API 주소를 찾지 못함'));
@@ -250,12 +260,12 @@ async function fifthStepChecks(config, app) {
   results.push(await pageKeyCheck(app));
 
   const expected = '공개 접속값으로 원본 자료 주소를 직접 불러도 메모가 보이지 않아야 함';
-  const key = original ? await readPublicAccessValue(app) : null;
+  const key = original ? await readPublicAccessValue(app, 'original_url_no_notes') : null;
   if (!original || !key) {
     results.push(notRun('original_url_no_notes', expected, '원본 자료 주소(originalApiUrl)나 공개 접속값을 찾지 못함'));
   } else {
     try {
-      const response = await send(`${original.href}?select=id&limit=1`, { headers: { apikey: key } });
+      const response = await send(`${original.href}?select=id&limit=1`, { headers: { apikey: key } }, 'original_url_no_notes');
       const data = response.ok ? await readJson(response) : null;
       const count = Array.isArray(data) ? data.length : null;
       results.push({ attackId: 'original_url_no_notes', expected,
@@ -284,10 +294,10 @@ async function sixthStepChecks(config, app) {
     const unregistered = await decide({ ...base, requestId: 'local-unregistered', deviceRegistered: false });
     const ok = registered.decision === 'allow'
       && unregistered.decision === 'deny' && unregistered.reasonCode === 'device_not_registered';
-    results.push({ attackId: 'device_registered_local', expected,
+    results.push({ local: true, attackId: 'device_registered_local', expected,
       observed: `로컬 가상 요청 연습: 등록 ${registered.decision}, 미등록 ${unregistered.decision}·${unregistered.reasonCode} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님` });
   } catch {
-    results.push({ attackId: 'device_registered_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
+    results.push({ local: true, attackId: 'device_registered_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
   }
   return results;
 }
@@ -309,10 +319,10 @@ async function seventhStepChecks(config, app) {
     const confirmed = await decide({ ...unusual, requestId: 'local-confirmed', stepUp: { verified: true, authAgeSeconds: 60 } });
     const ok = normal.decision === 'allow' && asked.decision === 'step_up'
       && asked.reasonCode === 'step_up_required' && confirmed.decision === 'allow';
-    results.push({ attackId: 'step_up_required_local', expected,
+    results.push({ local: true, attackId: 'step_up_required_local', expected,
       observed: `로컬 가상 사건 연습: 정상 ${normal.decision}, 복합 이상 ${asked.decision}·${asked.reasonCode}, 재확인 뒤 ${confirmed.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행(제공 엔진의 새 로그인 시각 검증 계약을 확인하지 못함)` });
   } catch {
-    results.push({ attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
+    results.push({ local: true, attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
   }
   return results;
 }
@@ -341,10 +351,10 @@ async function eighthStepChecks(config, app) {
       && unregistered.decision === 'deny' && unregistered.reasonCode === 'device_not_registered'
       && asked.decision === 'step_up' && confirmed.decision === 'allow'
       && [list, notice, instructor].every(item => item.decision === 'deny');
-    results.push({ attackId: 'decider_local', expected,
+    results.push({ local: true, attackId: 'decider_local', expected,
       observed: `로컬 가상 요청 연습: 자기 메모 ${own.decision}, 미등록 ${unregistered.decision}·${unregistered.reasonCode}, 복합 이상 ${asked.decision}, 재확인 뒤 ${confirmed.decision}, 메모 목록 ${list.decision}, 공지 쓰기 ${notice.decision}, 강사 자료 ${instructor.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다른 사람 메모의 거부는 자료 API 로컬 시험으로만 확인함` });
   } catch {
-    results.push({ attackId: 'decider_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
+    results.push({ local: true, attackId: 'decider_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함' });
   }
   return results;
 }
@@ -369,10 +379,10 @@ async function ninthStepChecks(config, app) {
     const ok = normal.action === 'observe' && burstOnly.action === 'observe'
       && suspicious.action === 'propose_revocation' && suspicious.reasonCode === 'burst_read' && suspicious.device === suspectDevice
       && mixed.action === 'propose_revocation' && mixed.device === suspectDevice;
-    results.push({ attackId: 'detect_local', expected,
+    results.push({ local: true, attackId: 'detect_local', expected,
       observed: `로컬 가상 사건 연습: 정상 ${normal.action}, 다량 조회만 ${burstOnly.action}, 복합 의심 ${suspicious.action}·${suspicious.reasonCode ?? '-'}(대상 기기 ${suspicious.device ? '1개' : '없음'}), 정상 기기와 섞인 경우 ${mixed.action}(대상 기기 ${mixed.device === suspectDevice ? '의심 기기 1개' : '없음'}) (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 실제 회수와 경과 시간은 심판이 확인하므로 미실행` });
   } catch {
-    results.push({ attackId: 'detect_local', expected, observed: '탐지 함수를 불러오지 못해 확인하지 못함. 실제 회수와 경과 시간은 미실행' });
+    results.push({ local: true, attackId: 'detect_local', expected, observed: '탐지 함수를 불러오지 못해 확인하지 못함. 실제 회수와 경과 시간은 미실행' });
   }
   return results;
 }
@@ -405,6 +415,7 @@ async function practiceChecks(config, app) {
   const policyOk = await policyComparisonOk();
   const merged = results.filter(item => !['decider_local', 'detect_local'].includes(item.attackId));
   merged.push({
+    local: true,
     attackId: 'local_practice',
     expected: '판정기·탐지와 정책 비교 연습이 기대대로 나와야 함 (미등록 기기 deny, 복합 이상 step_up, 메모 목록·공지 쓰기 deny, 복합 의심 propose_revocation, 정책 차이 계산)',
     observed: `로컬 연습(가상 요청): 판정기 ${label(same(decider))}, 탐지 ${label(same(detect))}, 정책 비교 ${label(policyOk)}. 심판 판정이 아님. 메모 복원·기기 승인·작전실 연습은 격리 환경에서 불러올 수 없어 제외했고 npm run recheck와 시험에서 실행함. 실제 회수와 경과 시간은 미실행`,
@@ -416,7 +427,7 @@ async function practiceChecks(config, app) {
 async function pageKeyCheck(app) {
   const expected = '첫 화면 코드에 Supabase 공개 접속값이나 토큰 모양 문자열이 없어야 함';
   try {
-    const response = await send(app);
+    const response = await send(app, {}, 'page_no_public_key');
     const page = await response.text();
     const shown = new RegExp(`${PUBLIC_ACCESS_VALUE}|eyJ[A-Za-z0-9_-]{12,}\\.eyJ[A-Za-z0-9_-]{12,}\\.[A-Za-z0-9_-]{8,}`, 'u').test(page);
     return { attackId: 'page_no_public_key', expected,

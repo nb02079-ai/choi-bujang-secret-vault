@@ -8,6 +8,7 @@
 // DB 쪽 GRANT·RLS는 이 파일이 아니라 별도 SQL로 둡니다.
 import { createHash } from 'node:crypto';
 import config from '../aleph.config.json' with { type: 'json' };
+import { createDeviceCheck } from './device-api.mjs';
 import { createLoginVerifier } from './verify-login.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -84,7 +85,8 @@ function pathId(req) {
   return typeof candidate === 'string' && UUID.test(candidate) ? candidate.toLowerCase() : null;
 }
 
-export function createNotesApi({ verify = defaultVerify, env = process.env, fetchImpl = fetch } = {}) {
+// deviceCheck를 주면 승인된 기기에서 온 요청만 자료를 받습니다(11단계). 운영용 notesApi에 연결합니다.
+export function createNotesApi({ verify = defaultVerify, env = process.env, fetchImpl = fetch, deviceCheck = null } = {}) {
   const store = async (method, { query = {}, body, prefer, table = TABLE } = {}) => {
     const url = new URL(table, env.SUPABASE_URL);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
@@ -125,6 +127,15 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
       res.setHeader('WWW-Authenticate', 'Bearer');
       res.status(401).json({ error: '로그인이 필요합니다.' });
       return null;
+    }
+    if (deviceCheck) {
+      let verdict;
+      try { verdict = await deviceCheck(req, identity); } catch { verdict = { allowed: false, reason: 'device_check_failed' }; }
+      if (!verdict?.allowed) {
+        logDenied(verdict?.reason ?? 'device_check_failed', req);
+        res.status(403).json({ error: '기기 승인이 필요합니다.', code: 'device_not_approved' });
+        return null;
+      }
     }
     return { identity };
   };
@@ -312,7 +323,7 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
     }
   };
 
-  return { collection, item, restore };
+  return { collection, item, restore, gated: Boolean(deviceCheck) };
 }
 
-export const notesApi = createNotesApi();
+export const notesApi = createNotesApi({ deviceCheck: createDeviceCheck() });

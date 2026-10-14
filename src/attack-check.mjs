@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -51,7 +51,8 @@ export async function runAttackChecks(config) {
   if (config.step === 7) return seventhStepChecks(config, app);
   if (config.step === 8) return eighthStepChecks(config, app);
   if (config.step === 9) return ninthStepChecks(config, app);
-  return tenthStepChecks(config, app);
+  if (config.step === 10) return tenthStepChecks(config, app);
+  return eleventhStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -445,6 +446,68 @@ async function tenthStepChecks(config, app) {
     results.push({ attackId: 'restore_local', expected, observed: '복원 연습을 불러오지 못해 확인하지 못함. 실제 DB 복원과 B 계정 확인은 미실행' });
   } finally {
     console.warn = quiet;
+  }
+  return results;
+}
+
+// 11단계: 10단계 점검에, 기기 승인 흐름을 메모리 저장소와 가상 요청으로 직접 해 본 결과를 더합니다.
+// 직접 점검은 20개 이내이고 각 글은 300자 이하여야 하므로, 로컬 연습 결과(판정기·탐지, 메모 복원, 기기 승인)를
+// local_practice 한 항목으로 합칩니다. 네트워크 요청이 아닌 로컬 연습이며 심판 판정이 아닙니다.
+async function eleventhStepChecks(config, app) {
+  const results = await tenthStepChecks(config, app);
+  const quiet = console.warn;
+  let deviceOk = false;
+  try {
+    const { createDeviceApi, createDeviceCheck, DEVICE_COOKIE } = await import('./device-api.mjs');
+    const { createNotesApi } = await import('./notes-api.mjs');
+    const [userA, noteA] = ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111'];
+    const tables = { vault_devices: [], vault_notes: [{ id: noteA, owner_id: userA, title: '로컬 연습 제목', content: '로컬 연습 내용' }] };
+    const fetchImpl = async (url, init) => {
+      const rows = tables[url.pathname.split('/').pop()];
+      const query = Object.fromEntries(url.searchParams);
+      const filters = Object.entries(query).filter(([key, value]) => !['select', 'limit', 'order'].includes(key) && value.startsWith('eq.'));
+      const hit = rows.filter(row => filters.every(([key, value]) => String(row[key]) === value.slice(3)));
+      const pick = row => (query.select ? Object.fromEntries(query.select.split(',').map(key => [key, row[key]])) : row);
+      const body = init.body ? JSON.parse(init.body) : undefined;
+      if (init.method === 'POST') { const row = { id: crypto.randomUUID(), ...body }; rows.push(row); return Response.json([pick(row)], { status: 201 }); }
+      if (init.method === 'PATCH') { hit.forEach(row => Object.assign(row, body)); return Response.json(hit.map(pick)); }
+      return Response.json(hit.map(pick));
+    };
+    const env = { SUPABASE_URL: 'https://local-practice.invalid', SUPABASE_SECRET_KEY: 'local-practice-only' };
+    const verify = async authorization => (authorization === 'Bearer a' ? { kind: 'student', userId: userA } : null);
+    const devices = createDeviceApi({ verify, env, fetchImpl });
+    const notes = createNotesApi({ verify, env, fetchImpl, deviceCheck: createDeviceCheck({ env, fetchImpl }) });
+    const ask = async (handler, method, { cookie, body } = {}) => {
+      const res = { statusCode: 0, headers: {}, body: undefined, setHeader(key, value) { this.headers[key.toLowerCase()] = value; },
+        status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
+      const headers = { authorization: 'Bearer a', ...(cookie ? { cookie: `${DEVICE_COOKIE}=${cookie}` } : {}) };
+      await handler({ method, url: '/api/x', headers, body }, res);
+      return res;
+    };
+    console.warn = () => {};
+    const requested = await ask(devices.request, 'POST');
+    const cookie = /=([A-Za-z0-9_-]{43});/u.exec(requested.headers['set-cookie'] ?? '')?.[1];
+    const beforeApproval = await ask(notes.collection, 'GET', { cookie });
+    const selfApproval = await ask(devices.approve, 'POST', { cookie, body: { code: requested.body?.code } });
+    tables.vault_devices[0].status = 'approved';
+    const afterApproval = await ask(notes.collection, 'GET', { cookie });
+    const noCookie = await ask(notes.collection, 'GET');
+    deviceOk = requested.statusCode === 201 && Boolean(cookie) && beforeApproval.statusCode === 403 && selfApproval.statusCode === 403
+      && afterApproval.statusCode === 200 && noCookie.statusCode === 403 && !JSON.stringify(tables.vault_devices).includes(cookie);
+  } catch {
+    deviceOk = false;
+  } finally {
+    console.warn = quiet;
+  }
+  const decider = results.find(item => item.attackId === 'decider_local');
+  const restore = results.find(item => item.attackId === 'restore_local');
+  const same = item => Boolean(item) && item.observed.includes('기대와 같음') && !item.observed.includes('기대와 다름') && !item.observed.includes('기대와 다른');
+  if (decider && restore) {
+    const label = ok => (ok ? '기대와 같음' : '기대와 다름');
+    results.splice(results.indexOf(restore), 1);
+    decider.attackId = 'local_practice';
+    decider.expected = '판정기·탐지, 메모 복원, 기기 승인 연습이 기대대로 나와야 함 (승인 전 자료 요청 403, 자기 승인 403, 승인 뒤 200)';
+    decider.observed = `로컬 연습(가짜 저장소·가상 요청): 판정기·탐지 ${label(same(decider))}, 메모 복원 ${label(same(restore))}, 기기 승인 ${label(deviceOk)}. 심판 판정이 아님. 실제 DB 복원, 기기 승인 흐름, B 계정 확인, 실제 회수는 미실행`;
   }
   return results;
 }

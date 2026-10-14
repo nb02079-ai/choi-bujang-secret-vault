@@ -1,0 +1,18 @@
+{
+  "name": "BYTE BACK 내 자료실",
+  "short_name": "내 자료실",
+  "description": "내 가상 자료실을 여는 접속 화면입니다. 기기 승인은 서버와 판정기가 정합니다.",
+  "lang": "ko",
+  "dir": "ltr",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101a28",
+  "theme_color": "#101a28",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

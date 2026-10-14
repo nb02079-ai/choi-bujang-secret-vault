@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BYTE BACK | 점령된 자료실</title>
+  <title>BYTE BACK 내 자료실</title>
+  <meta name="theme-color" content="#101a28">
+  <meta name="application-name" content="내 자료실">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
@@ -40,6 +45,23 @@
     li span { overflow-wrap: anywhere; white-space: pre-wrap; }
     .editor #note-message { min-height: 1.4em; margin: 12px 0 0; font-size: 15px; color: #ffb3c0; }
     .editor #note-message.ok { color: #9be3b0; }
+    .device { margin: 26px 0; padding: 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    .device h2 { margin: 0 0 12px; font-size: 18px; }
+    .device #device-status { display: inline-block; margin: 0 0 8px; padding: 4px 12px; border: 1px solid #51667c; border-radius: 999px; font-size: 15px; font-weight: 700; color: #ecf4ff; }
+    .device #device-status[data-status="approved"] { border-color: #9be3b0; color: #9be3b0; }
+    .device #device-status[data-status="denied"] { border-color: #d07384; color: #ffb3c0; }
+    .device #device-status[data-status="pending"] { border-color: #8ad8df; color: #8ad8df; }
+    .device p { margin: 6px 0 0; font-size: 15px; }
+    .device .device-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .device button { padding: 8px 14px; border: 0; border-radius: 8px; background: #8ad8df; color: #101a28; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .device button:disabled { opacity: .6; cursor: wait; }
+    .device .device-code { margin-top: 12px; padding: 12px 14px; border: 1px dashed #8ad8df; border-radius: 10px; color: #ecf4ff; overflow-wrap: anywhere; }
+    .device .device-approve { display: grid; gap: 10px; margin-top: 14px; }
+    .device .device-approve label { display: grid; gap: 4px; font-size: 14px; color: #bfd0e5; }
+    .device .device-approve input { padding: 10px 12px; border: 1px solid #51667c; border-radius: 8px; background: #101a28; color: #ecf4ff; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; }
+    .device #device-message { min-height: 1.4em; color: #ffb3c0; }
+    .device #device-message.ok { color: #9be3b0; }
+    #offline-banner { margin: 0 0 18px; padding: 12px 16px; border: 1px solid #d0a373; border-radius: 12px; background: #5a45222e; color: #ffe9cc; font-size: 15px; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -47,7 +69,24 @@
     <div class="eyebrow">BYTE BACK · 1단계 피해 확인</div>
     <h1>점령된 자료실</h1>
     <p>아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
+    <div id="offline-banner" role="status" aria-live="polite" hidden></div>
     <div class="notice">로그인한 계정은 자기 가상 메모만 읽고 추가·수정·삭제할 수 있습니다. 다른 사람의 메모는 보이지 않고, id를 알아도 접근이 거부됩니다.</div>
+    <section class="device" aria-labelledby="device-title">
+      <h2 id="device-title">기기 승인 상태</h2>
+      <p id="device-status" data-status="unverified">확인 전</p>
+      <p id="device-note">기기 승인은 서버와 판정기가 정합니다. 앱을 설치했다는 표시만으로 이 기기가 확인된 것은 아닙니다.</p>
+      <p id="install-state">앱 설치 상태를 확인하는 중입니다.</p>
+      <div id="device-actions" class="device-actions" hidden>
+        <button id="device-request" type="button">이 기기 승인 요청</button>
+        <button id="device-refresh" type="button">승인 상태 새로고침</button>
+      </div>
+      <p id="device-code" class="device-code" role="status" hidden></p>
+      <form id="device-approve-form" class="device-approve" hidden>
+        <label>다른 기기에 표시된 승인 코드 <input id="approve-code" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+        <button id="approve-submit" type="submit">이 코드의 기기 승인</button>
+      </form>
+      <p id="device-message" role="status" aria-live="polite"></p>
+    </section>
     <section class="auth" aria-labelledby="auth-title">
       <h2 id="auth-title">계정</h2>
       <form id="login-form">
@@ -70,29 +109,16 @@
       </form>
       <p id="note-message" role="alert" aria-live="polite"></p>
     </section>
-    <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
+    <ul id="notes" aria-live="polite"><li>로그인하면 이 기기의 승인 상태를 확인합니다. 승인된 기기에서만 내 메모가 보입니다.</li></ul>
   </main>
   <script type="module">
-    // 이 화면에는 Supabase 주소도 키도 없습니다. 로그인·갱신·로그아웃과 모든 자료 요청은 서버 함수(/api/...)로만 보냅니다.
-    // 로그인 토큰은 이 탭의 sessionStorage에만 두고, 탭을 닫으면 사라집니다.
-    const STORE_KEY = 'vault.session';
-    const readStored = () => {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem(STORE_KEY));
-        return saved && typeof saved.access_token === 'string' && typeof saved.refresh_token === 'string'
-          && Number.isFinite(saved.expires_at) ? saved : null;
-      } catch { return null; }
-    };
-    const writeStored = (next) => {
-      try {
-        if (next) sessionStorage.setItem(STORE_KEY, JSON.stringify(next));
-        else sessionStorage.removeItem(STORE_KEY);
-      } catch { /* 저장소를 못 쓰면 이 탭의 메모리에만 둡니다 */ }
-    };
-    let session = readStored();
+    import { setDeviceStatus, viewState } from '/app-shell.js';
+    // 이 화면에는 Supabase 주소도 키도 없습니다. 로그인·갱신·로그아웃, 기기 승인, 모든 자료 요청은 서버 함수(/api/...)로만 보냅니다.
+    // 로그인 토큰은 이 화면의 메모리에만 두고 브라우저 저장소에는 쓰지 않습니다. 새로고침하면 다시 로그인합니다.
+    // 기기를 알아보는 값은 서버가 HttpOnly 쿠키로 내려 주며 이 화면의 스크립트는 읽을 수 없습니다.
+    let session = null;
     const setSession = (next) => {
       session = next;
-      writeStored(next);
       apply(next);
     };
     const authPost = async (path, payload, token) => {
@@ -130,7 +156,6 @@
       const signedIn = Boolean(next?.access_token);
       form.hidden = signedIn;
       sessionBox.hidden = !signedIn;
-      document.querySelector('#editor').hidden = !signedIn;
       who.textContent = signedIn ? `로그인됨: ${next.email}` : '';
     };
 
@@ -162,6 +187,7 @@
     });
 
     const list = document.querySelector('#notes');
+    const editor = document.querySelector('#editor');
     const noteForm = document.querySelector('#note-form');
     const noteMessage = document.querySelector('#note-message');
     const addButton = document.querySelector('#add');
@@ -175,7 +201,117 @@
       list.replaceChildren(item);
     };
 
+    // 기기 승인 상태는 서버가 알려 준 값만 따릅니다. 이 화면의 버튼은 요청을 보낼 뿐 승인 상태를 바꾸지 않습니다.
+    const device = {
+      actions: document.querySelector('#device-actions'),
+      request: document.querySelector('#device-request'),
+      refresh: document.querySelector('#device-refresh'),
+      code: document.querySelector('#device-code'),
+      approveForm: document.querySelector('#device-approve-form'),
+      approveInput: document.querySelector('#approve-code'),
+      message: document.querySelector('#device-message'),
+    };
+    let deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+    const sayDevice = (text, ok = false) => {
+      device.message.textContent = text;
+      device.message.classList.toggle('ok', ok);
+    };
+    const renderDevice = () => {
+      const view = viewState({ signedIn: Boolean(session?.access_token), status: deviceState.status });
+      setDeviceStatus(document, view.status);
+      device.actions.hidden = !view.showActions;
+      device.request.hidden = !view.showRequest;
+      device.approveForm.hidden = !view.showApprove;
+      const showCode = view.status === 'pending' && Boolean(deviceState.code);
+      device.code.hidden = !showCode;
+      device.code.textContent = showCode
+        ? `승인 코드: ${deviceState.code} (이미 승인된 기기에서 로그인해 이 코드를 입력하면 승인됩니다. 약 ${Math.max(1, Math.ceil((deviceState.expiresInSeconds ?? 0) / 60))}분 안에 입력하세요.)`
+        : '';
+      editor.hidden = !view.showEditor;
+      if (!view.showNotes) listMessage(view.message);
+    };
+    const deviceCall = async (method, path, payload) => {
+      if (nearExpiry()) await refreshSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('로그인이 필요합니다.');
+      const headers = { Authorization: `Bearer ${token}` };
+      if (payload !== undefined) headers['Content-Type'] = 'application/json';
+      const response = await fetch(path, {
+        method, cache: 'no-store', credentials: 'same-origin', headers,
+        body: payload === undefined ? undefined : JSON.stringify(payload),
+      });
+      let result = null;
+      try { result = await response.json(); } catch { /* 본문 없음 */ }
+      return { ok: response.ok, status: response.status, result };
+    };
+    const takeDeviceState = (result) => {
+      deviceState = { status: result?.status ?? 'unverified', code: result?.code ?? null, expiresInSeconds: result?.expiresInSeconds ?? null };
+    };
+    // 서버가 승인됨이라고 알려 주지 않으면(오류 포함) 확인 전으로 닫습니다.
+    const loadDevice = async () => {
+      if (!session?.access_token) {
+        deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+        renderDevice();
+        return;
+      }
+      try {
+        const reply = await deviceCall('GET', '/api/device/status');
+        if (reply.ok) takeDeviceState(reply.result);
+        else {
+          deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+          sayDevice(reply.result?.error ?? `기기 상태를 확인하지 못했습니다 (HTTP ${reply.status})`);
+        }
+      } catch (error) {
+        deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+        sayDevice(error.message);
+      }
+      renderDevice();
+    };
+
+    device.request.addEventListener('click', async () => {
+      device.request.disabled = true;
+      sayDevice('승인을 요청하는 중입니다.');
+      try {
+        const reply = await deviceCall('POST', '/api/device/request', {});
+        if (reply.ok) {
+          takeDeviceState(reply.result);
+          sayDevice(deviceState.status === 'approved' ? '이 기기는 이미 승인되어 있습니다.' : '승인을 요청했습니다. 승인되기 전에는 자료를 볼 수 없습니다.', true);
+        } else {
+          if (reply.result?.status) takeDeviceState(reply.result);
+          sayDevice(reply.result?.error ?? `요청하지 못했습니다 (HTTP ${reply.status})`);
+        }
+      } catch (error) {
+        sayDevice(error.message);
+      } finally {
+        device.request.disabled = false;
+      }
+      renderDevice();
+      if (deviceState.status === 'approved') loadNotes();
+    });
+    device.refresh.addEventListener('click', async () => {
+      sayDevice('승인 상태를 확인하는 중입니다.');
+      await loadDevice();
+      sayDevice(deviceState.status === 'approved' ? '이 기기는 승인되었습니다.' : '', deviceState.status === 'approved');
+      if (deviceState.status === 'approved') loadNotes();
+    });
+    device.approveForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      sayDevice('다른 기기를 승인하는 중입니다.');
+      try {
+        const reply = await deviceCall('POST', '/api/device/approve', { code: device.approveInput.value });
+        if (reply.ok) {
+          device.approveInput.value = '';
+          sayDevice('입력한 코드의 기기를 승인했습니다. 그 기기에서 승인 상태를 새로고침하세요.', true);
+        } else {
+          sayDevice(reply.result?.error ?? `승인하지 못했습니다 (HTTP ${reply.status})`);
+        }
+      } catch (error) {
+        sayDevice(error.message);
+      }
+    });
+
     // 모든 자료 요청은 로그인 토큰을 실어 서버 API로 보냅니다. 사용자 ID는 서버가 토큰에서 확인합니다.
+    // 서버가 기기 승인을 요구하면(403) 화면도 확인 전으로 돌아갑니다.
     const callApi = async (method, path, payload) => {
       if (nearExpiry()) await refreshSession();
       const token = session?.access_token;
@@ -183,12 +319,17 @@
       const headers = { Authorization: `Bearer ${token}` };
       if (payload !== undefined) headers['Content-Type'] = 'application/json';
       const response = await fetch(path, {
-        method, cache: 'no-store', headers,
+        method, cache: 'no-store', credentials: 'same-origin', headers,
         body: payload === undefined ? undefined : JSON.stringify(payload),
       });
       let result = null;
       try { result = await response.json(); } catch { /* 본문 없음 */ }
       if (response.status === 401) throw new Error('로그인이 확인되지 않아 요청을 처리할 수 없습니다.');
+      if (response.status === 403 && result?.code === 'device_not_approved') {
+        deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+        renderDevice();
+        throw new Error('이 기기는 승인되지 않았습니다. 기기 승인 상태를 확인해 주세요.');
+      }
       if (!response.ok) throw new Error(result?.error ?? `요청이 실패했습니다 (HTTP ${response.status})`);
       return result;
     };
@@ -261,8 +402,8 @@
     let currentSession = null;
     const loadNotes = async () => {
       const ticket = ++latest;
-      if (!currentSession?.access_token) {
-        listMessage('로그인하면 내 메모가 보입니다.');
+      if (!currentSession?.access_token || deviceState.status !== 'approved') {
+        renderDevice();
         return;
       }
       try {
@@ -275,7 +416,7 @@
         }
         list.replaceChildren(...notes.map(renderNote));
       } catch (error) {
-        if (ticket === latest) listMessage(error.message);
+        if (ticket === latest && deviceState.status === 'approved') listMessage(error.message);
       }
     };
 
@@ -296,18 +437,25 @@
       }
     });
 
-    // 로그인 상태가 바뀔 때만 화면과 자료를 다시 맞춥니다.
+    // 로그인 상태가 바뀔 때만 화면과 자료를 다시 맞춥니다. 처음 로그인하거나 로그아웃하면 기기 승인 상태를 다시 확인합니다.
     let appliedToken;
     const apply = (next) => {
       const token = next?.access_token ?? null;
       if (token === appliedToken) return;
+      const wasSignedIn = Boolean(appliedToken);
       appliedToken = token;
       currentSession = next ?? null;
       showSession(next);
       sayNote('');
-      loadNotes();
+      if (!token || !wasSignedIn) {
+        sayDevice('');
+        deviceState = { status: 'unverified', code: null, expiresInSeconds: null };
+        renderDevice();
+        if (token) loadDevice().then(loadNotes);
+      } else {
+        loadNotes();
+      }
     };
-    if (nearExpiry()) await refreshSession();
     apply(session);
   </script>
 </body>

@@ -24,6 +24,26 @@ const sameUser = (a, b) => typeof a === 'string' && typeof b === 'string'
   && a.length > 0 && a.toLowerCase() === b.toLowerCase();
 const toNote = ({ id, title, content }) => ({ id, title, body: content });
 
+// 권한은 한 곳에서만 판단합니다. 검증된 사용자 ID와 저장된 행의 owner_id가 같을 때만 허용합니다.
+// 강사 권한은 저장된 근거가 없으므로 부여하지 않습니다. 본문·쿼리·헤더·토큰의 role 같은 값은 권한이 되지 않습니다.
+function authorize(identity, row) {
+  if (!row) return { allowed: false, reason: 'missing' };
+  if (typeof row.owner_id !== 'string' || row.owner_id.length === 0) return { allowed: false, reason: 'no_owner' };
+  return sameUser(row.owner_id, identity?.userId) ? { allowed: true, reason: 'ok' }
+    : { allowed: false, reason: 'not_owner' };
+}
+
+// 거부 사유는 고정된 짧은 코드와 요청 방식만 남깁니다. 사용자 ID, 메모 ID, 토큰, 본문은 기록하지 않습니다.
+const logDenied = (reason, req) => console.warn('notes: 거부', reason, req.method);
+
+// 권한처럼 보이는 값이 요청에 실려 와도 읽지 않고, 있었다는 사실만 기록합니다.
+const CLAIM_NAMES = ['role', 'roles', 'owner_id', 'userid', 'user_id', 'zone', 'resource', 'is_instructor'];
+function claimedPrivilege(req, body) {
+  const names = [...Object.keys(body ?? {}), ...Object.keys(req.query ?? {}), ...Object.keys(req.headers ?? {})]
+    .map(name => name.toLowerCase().replace(/^x-/u, '').replace(/-/gu, '_'));
+  return names.some(name => CLAIM_NAMES.includes(name));
+}
+
 function readJsonBody(req) {
   let body = req.body;
   if (typeof body === 'string') {
@@ -108,14 +128,20 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
     const { identity } = checked;
     try {
       if (req.method === 'GET') {
+        if (claimedPrivilege(req, null)) logDenied('privilege_field_ignored', req);
         const result = await store('GET', { query: {
-          select: 'id,title,content', owner_id: `eq.${identity.userId}`, order: 'created_at.asc,id.asc',
+          select: 'id,title,content,owner_id', owner_id: `eq.${identity.userId}`, order: 'created_at.asc,id.asc',
         } });
         if (!result.ok) return storeFailed(res, result.status);
-        return res.status(200).json(Array.isArray(result.rows) ? result.rows.map(toNote) : []);
+        // 저장소가 조건을 지키지 않은 경우에 대비해, 돌아온 행의 소유자를 코드에서 다시 대조합니다.
+        const rows = Array.isArray(result.rows) ? result.rows : [];
+        const mine = rows.filter(row => authorize(identity, row).allowed);
+        if (mine.length !== rows.length) logDenied('owner_mismatch', req);
+        return res.status(200).json(mine.map(toNote));
       }
 
       const body = readJsonBody(req);
+      if (claimedPrivilege(req, body)) logDenied('privilege_field_ignored', req);
       const fields = body && cleanFields(body);
       if (!fields) return res.status(400).json({ error: '제목(1~100자)과 내용(2000자 이하)을 문자열로 보내 주세요.' });
       if (body.id !== undefined && !(typeof body.id === 'string' && UUID.test(body.id))) {
@@ -134,11 +160,12 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
 
   // 검증된 사용자 ID와 DB 행의 owner_id를 코드에서 직접 비교합니다.
   // 남의 메모, 주인이 없는 메모, 없는 메모는 모두 같은 404로 답해 존재 여부를 알려 주지 않습니다.
-  const loadOwned = async (id, userId) => {
+  const loadOwned = async (id, identity) => {
     const result = await store('GET', { query: { select: 'id,title,content,owner_id', id: `eq.${id}`, limit: '1' } });
     if (!result.ok) return { failed: result.status };
     const row = result.rows?.[0];
-    return row && sameUser(row.owner_id, userId) ? { row } : { missing: true };
+    const verdict = authorize(identity, row);
+    return verdict.allowed ? { row } : { missing: true, reason: verdict.reason };
   };
 
   // /api/notes/:id : GET 한 건, PUT 수정, DELETE 삭제 (모두 본인 메모만)
@@ -147,11 +174,15 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
     if (!checked) return undefined;
     const { identity } = checked;
     const id = pathId(req);
-    const notFound = () => res.status(404).json({ error: '메모를 찾을 수 없습니다.' });
-    if (!id) return notFound();
+    const notFound = (reason = 'missing') => {
+      logDenied(reason, req);
+      return res.status(404).json({ error: '메모를 찾을 수 없습니다.' });
+    };
+    if (!id) return notFound('bad_id');
     try {
       if (req.method === 'PUT') {
         const body = readJsonBody(req);
+        if (claimedPrivilege(req, body)) logDenied('privilege_field_ignored', req);
         const fields = body && cleanFields(body);
         if (!fields) return res.status(400).json({ error: '제목(1~100자)과 내용(2000자 이하)을 문자열로 보내 주세요.' });
         if (body.id !== undefined && String(body.id).toLowerCase() !== id) {
@@ -159,30 +190,32 @@ export function createNotesApi({ verify = defaultVerify, env = process.env, fetc
         }
         // 새 행의 소유자도 본인이어야 합니다. 본문이 다른 owner_id를 내세우면 쓰기 전에 거부합니다.
         if ('owner_id' in body && !(typeof body.owner_id === 'string' && sameUser(body.owner_id, identity.userId))) {
+          logDenied('owner_change_attempt', req);
           return res.status(403).json({ error: '메모의 소유자는 바꿀 수 없습니다.' });
         }
-        const owned = await loadOwned(id, identity.userId);
+        const owned = await loadOwned(id, identity);
         if (owned.failed) return storeFailed(res, owned.failed);
-        if (owned.missing) return notFound();
+        if (owned.missing) return notFound(owned.reason);
         // 조건에 owner_id를 다시 걸어, 확인과 쓰기 사이에 소유자가 바뀐 경우에도 본인 행만 고칩니다.
         const result = await store('PATCH', {
           query: { select: 'id', id: `eq.${id}`, owner_id: `eq.${identity.userId}` },
           body: { ...fields, owner_id: identity.userId }, prefer: 'return=representation',
         });
         if (!result.ok) return storeFailed(res, result.status);
-        return result.rows?.[0] ? res.status(200).json({ id }) : notFound();
+        return result.rows?.[0] ? res.status(200).json({ id }) : notFound('owner_changed');
       }
 
-      const owned = await loadOwned(id, identity.userId);
+      if (claimedPrivilege(req, null)) logDenied('privilege_field_ignored', req);
+      const owned = await loadOwned(id, identity);
       if (owned.failed) return storeFailed(res, owned.failed);
-      if (owned.missing) return notFound();
+      if (owned.missing) return notFound(owned.reason);
       if (req.method === 'GET') return res.status(200).json(toNote(owned.row));
 
       const result = await store('DELETE', {
         query: { select: 'id', id: `eq.${id}`, owner_id: `eq.${identity.userId}` }, prefer: 'return=representation',
       });
       if (!result.ok) return storeFailed(res, result.status);
-      return result.rows?.[0] ? res.status(200).json({ id }) : notFound();
+      return result.rows?.[0] ? res.status(200).json({ id }) : notFound('owner_changed');
     } catch {
       return unreachable(res);
     }

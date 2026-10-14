@@ -52,7 +52,7 @@
 - 로그인한 사용자는 가상 메모를 추가·수정·삭제할 수 있습니다. 추가할 때 `owner_id`는 서버가 확인한 사용자 ID로 저장합니다. 제목은 1~100자, 내용은 2000자 이하입니다. 코드는 `api/notes/index.mjs`, `api/notes/[id].mjs`, 공용 로직 `src/notes-api.mjs`입니다.
 - 검사에 쓴 발급자 정보(`issuer`, `audience`, `jwksUrl`, 비밀 제외)는 `aleph.config.json`의 `identityProvider`에 있습니다.
 
-| 경로 (`allowedRoutes`) | 동작 | 응답 |
+| 경로 (3단계 당시 `allowedRoutes`. 8단계에서 목록·추가 두 줄을 뺌) | 동작 | 응답 |
 |---|---|---|
 | `GET /api/notes` | 로그인 사용자의 메모 목록 | `[{id,title,body}]` |
 | `POST /api/notes` | 추가. `{id?,title,body}`, id는 UUID이고 없으면 서버가 만듦 | 201 `{id}` |
@@ -76,7 +76,7 @@
 - 목록은 본인 메모만 돌려줍니다. 한 건 조회·수정·삭제에서 남의 메모, 주인이 없는 메모, 없는 메모는 모두 같은 404입니다. 존재 여부를 알려 주지 않기 위해서입니다.
 - 추가할 때 `owner_id`는 검증된 사용자 ID로만 저장합니다. URL·본문의 `owner_id`는 믿지 않습니다.
 - 수정은 기존 행이 본인 것이어야 하고 새 행의 소유자도 본인이어야 합니다. 본문이 다른 `owner_id`(다른 사람·null·숫자·빈 값)를 내세우면 쓰기 전에 403으로 거부합니다. 저장소에 보내는 수정·삭제에도 `owner_id=본인` 조건을 다시 겁니다.
-- 한 건 응답은 `{id,title,body}`, 수정 본문은 `{title,body}`입니다. `allowedRoutes` 5개는 실제 처리하는 방식·경로와 정확히 같고, 시험이 이를 확인합니다.
+- 한 건 응답은 `{id,title,body}`, 수정 본문은 `{title,body}`입니다. `allowedRoutes` 5개는 실제 처리하는 방식·경로와 정확히 같고, 시험이 이를 확인합니다(8단계에서 3개로 줄였습니다. 아래 8단계 참고).
 - DB 쪽: 로컬 `supabase/003_rls_least_privilege.sql`(Git에 올리지 않음)이 `vault_notes`의 기존 권한을 `REVOKE ALL … FROM PUBLIC, anon, authenticated`로 회수하고 `authenticated`에 `SELECT·INSERT·UPDATE·DELETE`만 줍니다. RLS 정책은 `SELECT`·`DELETE`는 기존 행(USING), `INSERT`는 새 행(WITH CHECK), `UPDATE`는 둘 다 `auth.uid() = owner_id`일 때만 허용합니다. 앱 서버는 RLS를 우회하는 서버 비공개 설정값로 접속하므로, 서버 코드의 소유자 비교가 1차 방어이고 GRANT·RLS는 키 없이 DB에 직접 닿는 경로를 막는 2차 방어입니다.
 - 기존 가상 메모의 소유자 연결은 로컬 `supabase/002_assign_owners.sql`로 했습니다. `과제`·`포트폴리오`·`아침 리추얼`은 A, `B의 시험 메모`는 B 소유이고, `훈련 행정 자료`는 주인이 없어 누구도 접근하지 못합니다.
 
@@ -114,7 +114,7 @@
 **현재 작동하는 기능 (5단계 저장점):**
 - 브라우저 코드(`public/index.html`)는 Supabase를 직접 부르지 않습니다. `supabase-js`와 Project URL, 공개용 키를 화면에서 모두 없앴습니다. 로그인·토큰 갱신·로그아웃은 서버 함수 `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`(`src/auth-api.mjs`)이 Supabase Auth로 대신 전달하고, 메모 읽기·추가·수정·삭제는 `callApi()`로 `/api/notes`, `/api/notes/:id`만 부릅니다. 로그인 토큰은 그 탭의 `sessionStorage`에만 두고 탭을 닫으면 사라집니다. 서버 함수는 이메일·비밀번호·토큰을 로그에 남기지 않고, 로그인 실패는 계정 존재 여부를 알리지 않는 같은 문구로 답합니다.
 - 로그인 서버 함수는 Vercel 환경변수 `SUPABASE_PUBLISHABLE_KEY`(공개용 키)를 서버에서만 읽습니다. 값은 학생이 Settings → Environment Variables에 직접 넣고, 넣은 뒤 Redeploy해야 합니다. 이 값이 없으면 로그인이 500(서버 설정 미완료)으로 실패합니다. `/api/auth/*`는 자료 API가 아니라서 `allowedRoutes`에 넣지 않았습니다.
-- 서버 함수의 로그인 검사, 소유자 비교, 서버 비공개 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로입니다.
+- 서버 함수의 로그인 검사, 소유자 비교, 서버 비공개 설정(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)은 4단계 그대로입니다. `allowedRoutes` 5개도 그대로였습니다(8단계에서 3개로 줄였습니다).
 - `aleph.config.json`의 `originalApiUrl`은 쿼리 없는 원본 자료 주소 `https://hcaygyndhpfqrwlfbpqt.supabase.co/rest/v1/vault_notes`입니다. 이 주소를 공개 anon 키로 직접 부르면 거부되어야 하고, 메모가 보이면 안 됩니다. 배포 신원 파일 `/aleph.json`에도 같은 주소가 `originalApiUrl`로 실립니다(5단계부터, 쿼리가 없는 `https://` 경로가 아니면 빌드가 실패합니다). 허용 경로 목록 `allowedRoutes`(`GET /api/notes` 같은 형식, 1개 이상)도 `/aleph.json`에 실리며, 비어 있거나 형식이 다르면 빌드가 실패합니다. `restoreRoute`는 아직 `null`입니다.
 - DB 쪽: 로컬 `supabase/004_revoke_direct_access.sql`(Git에 올리지 않음)이 `vault_notes`의 `PUBLIC`·`anon`·`authenticated` 권한을 모두 회수하고, 서비스 역할의 네 권한과 RLS가 남았는지 같은 트랜잭션에서 확인합니다. 003의 RLS 정책 네 개는 지우지 않고 2차 방어로 남깁니다.
 
@@ -228,6 +228,27 @@
 - 현재 실제 경로의 `signals.source`는 `none`이므로 실제 접속에서는 이 규칙이 작동하지 않고 기기 규칙만 적용됩니다.
 - **미실행:** 제공 엔진이 같은 내 로그인으로 다시 로그인한 시각을 검증하는 계약을 이 저장소에서 찾지 못했습니다(`docs/DECIDER_REQUEST.md`에는 `stepUp` 값의 형식만 있습니다). 그래서 다시 로그인 전 실제 자료 차단, 재로그인 확인, 새 로그인 뒤 요청 허용은 실행하지 않았습니다(`npm run bundle`에서는 `step_up_required_local`의 `observed`에 미실행으로 적습니다). 토큰 원문은 어디에도 기록하지 않았습니다.
 - 이유 코드 `step_up_required`가 운영 등록부(`allowedReasonCodes`)에 있는지 확인하지 못했습니다.
+
+## 8단계: 같은 계정이어도 구역을 나눠 확인합니다
+
+**현재 작동하는 기능 (판정기 구역 규칙 세 개 추가, 6·7단계 규칙 유지):**
+- 판정 순서: 기기 미등록 `deny` → 구역 `deny` → 복합 이상 `step_up` → `allow`. 규칙 이름은 `RULE_IDS`의 `device_registered`, `step_up_required`, `zone_route_exact`, `zone_notice_read_only`, `zone_instructor_denied`입니다. 판정기는 `service`, `method`, `route`, `path`만 읽고 쿼리와 역할 값은 읽지 않습니다.
+- 내 메모(`notes`): `GET`·`PUT`·`DELETE /notes/:id`만 허용합니다. 메모 전체 목록과 추가(`/notes`), ID가 빈 경로, 깊이가 다른 경로, `..`·`%`·공백이 든 ID, `export`·`import`·`search`·`list`·`all`·`new`·`bulk` 같은 기능 이름은 `deny`(이유 코드 `route_not_allowed`)입니다. 심판의 가상 요청은 메모 ID가 UUID가 아닐 수 있으므로 ID 형식은 UUID로 좁히지 않습니다.
+- 반 공지(`notices`): `GET /notices`, `GET /notices/:id`만 허용합니다. `POST`·`PUT`·`PATCH`·`DELETE`는 누구에게나 `deny`(`zone_forbidden`)입니다. 판정기 요청에는 역할이 없으므로 강사의 공지 수정은 판정기가 아니라 서버의 관리 경로에서 처리해야 합니다. 이 관리 경로는 아직 없습니다.
+- 강사 자료(`instructor`): 모든 방식과 경로를 `deny`(`zone_forbidden`)합니다. 서비스 이름을 바꿔 경로 첫 칸만 `instructor`로 속여도 거부합니다. 알 수 없는 서비스, 경로, 방식도 거부합니다.
+- 자료 API(`src/notes-api.mjs`)의 소유자 재대조: 검증된 사용자 ID(`student` 또는 `judge`)와 저장된 `owner_id`를 다시 비교합니다. 남의 메모, 주인 없는 메모, 없는 메모는 모두 같은 404이고, 본문이 다른 `owner_id`를 내세우면 쓰기 전에 403입니다. 강사 권한을 저장하는 곳이 없어서 강사 권한은 항상 거부합니다. 화면 메뉴, 요청 본문, 쿼리, 헤더의 `role`·`owner_id`는 무시하고 이유 코드만 로그에 남깁니다. 로그에는 ID, 토큰, 본문을 싣지 않습니다.
+- `aleph.config.json`의 `allowedRoutes`는 판정기가 허용하는 `GET`·`PUT`·`DELETE /api/notes/:id` 세 개로 줄였습니다.
+
+**확인 순서:**
+1. `npm run fixture:7`: `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
+2. `npm run decider:test`: 모든 줄이 `통과`여야 합니다.
+3. `node --test test/*.test.mjs`: 구역 규칙은 `test/decider-zones.test.mjs`, 소유자 재대조는 `test/notes-owner-recheck.test.mjs`가 확인합니다.
+
+**기록 범위와 한계:**
+- 위 확인은 가상 요청과 가짜 저장소로 하는 로컬 연습이며 심판 판정이 아닙니다. `npm run bundle`의 `decider_local` 점검도 같은 성격이고, 직접 점검 상한 20개를 맞추려고 기기·추가 확인·구역 연습을 한 항목으로 합쳤습니다.
+- **미실행:** A·B 실제 계정의 `cross_user_access`, 환경변수 `SUPABASE_PUBLISHABLE_KEY`가 필요한 anon 직접 요청, 다시 로그인 전 실제 자료 차단과 새 요청 허용은 실행하지 않았습니다.
+- **미확인:** 이유 코드 `route_not_allowed`·`zone_forbidden`이 운영 등록부(`allowedReasonCodes`)에 있는지, 서비스 이름 `notices`·`instructor`가 엔진의 값과 같은지, 엔진이 보내는 `route`·`path`가 `/notes/:id`인지 `/api/notes/:id`인지 확인하지 못했습니다. 거부는 어느 경우에도 안전한 방향입니다.
+- **남은 약점:** 화면(`public/index.html`)이 부르는 `GET`·`POST /api/notes`가 `allowedRoutes`에 없어 화면의 메모 목록과 추가가 막힐 수 있습니다. 공지와 강사 자료를 처리하는 서버 경로, 강사 권한 저장소, 자원 ID 표시(과정 1/3)는 아직 없습니다. 이 저장점 뒤 배포는 이 문제를 정한 다음에 합니다.
 
 ## 다음 단계의 코딩 도구에 전달할 규칙
 

@@ -37,7 +37,7 @@ async function readJson(response) {
 }
 
 export async function runAttackChecks(config) {
-  if (![1, 2, 3, 4, 5, 6, 7].includes(config.step)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(config.step)) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
   const app = publicApp(config);
@@ -48,7 +48,8 @@ export async function runAttackChecks(config) {
   if (config.step === 4) return fourthStepChecks(config, app);
   if (config.step === 5) return fifthStepChecks(config, app);
   if (config.step === 6) return sixthStepChecks(config, app);
-  return seventhStepChecks(config, app);
+  if (config.step === 7) return seventhStepChecks(config, app);
+  return eighthStepChecks(config, app);
 }
 
 async function firstStepChecks(config, app) {
@@ -308,6 +309,39 @@ async function seventhStepChecks(config, app) {
       observed: `로컬 가상 사건 연습: 정상 ${normal.decision}, 복합 이상 ${asked.decision}·${asked.reasonCode}, 재확인 뒤 ${confirmed.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행(제공 엔진의 새 로그인 시각 검증 계약을 확인하지 못함)` });
   } catch {
     results.push({ attackId: 'step_up_required_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
+  }
+  return results;
+}
+
+// 8단계: 5단계 점검에, 판정기에 가상 요청을 직접 넣어 본 결과 하나(decider_local)를 더합니다.
+// 직접 점검은 20개를 넘길 수 없어 기기·추가 확인·구역 연습을 한 항목으로 합칩니다.
+// 로컬 연습이며 심판 판정이 아닙니다. 다른 사람 메모의 거부는 자료 API의 로컬 시험으로만 확인합니다.
+async function eighthStepChecks(config, app) {
+  const results = await fifthStepChecks(config, app);
+  const expected = '기기·추가 확인·구역 규칙: 미등록 기기 deny, 복합 이상 step_up, 정상 자기 메모 allow, 메모 목록·공지 쓰기·강사 자료 deny여야 함';
+  try {
+    const { decide } = await import('./decider.mjs');
+    const base = { schema: 'aleph.decision.v1', service: 'notes', method: 'GET', path: '/notes/demo', route: 'GET /notes/:id',
+      deviceRegistered: true, stepUp: { verified: false, authAgeSeconds: null }, recentEvents: [],
+      signals: { source: 'judge_fixture', region: 'local', network: 'usual', hour: 14 } };
+    const ask = (requestId, patch = {}) => decide({ ...base, requestId, ...patch });
+    const own = await ask('local-own');
+    const unregistered = await ask('local-unregistered', { deviceRegistered: false });
+    const unusual = { signals: { source: 'judge_fixture', region: 'foreign', network: 'unusual', hour: 3 },
+      recentEvents: [{ kind: 'risk_signal', ageSeconds: 60, count: 20 }] };
+    const asked = await ask('local-unusual', unusual);
+    const confirmed = await ask('local-confirmed', { ...unusual, stepUp: { verified: true, authAgeSeconds: 60 } });
+    const list = await ask('local-list', { route: 'GET /notes', path: '/notes' });
+    const notice = await ask('local-notice-write', { service: 'notices', method: 'PUT', route: 'PUT /notices/:id', path: '/notices/demo' });
+    const instructor = await ask('local-instructor', { service: 'instructor', route: 'GET /instructor/:id', path: '/instructor/demo' });
+    const ok = own.decision === 'allow'
+      && unregistered.decision === 'deny' && unregistered.reasonCode === 'device_not_registered'
+      && asked.decision === 'step_up' && confirmed.decision === 'allow'
+      && [list, notice, instructor].every(item => item.decision === 'deny');
+    results.push({ attackId: 'decider_local', expected,
+      observed: `로컬 가상 요청 연습: 자기 메모 ${own.decision}, 미등록 ${unregistered.decision}·${unregistered.reasonCode}, 복합 이상 ${asked.decision}, 재확인 뒤 ${confirmed.decision}, 메모 목록 ${list.decision}, 공지 쓰기 ${notice.decision}, 강사 자료 ${instructor.decision} (${ok ? '기대와 같음' : '기대와 다름'}). 심판 판정이 아님. 다른 사람 메모의 거부는 자료 API 로컬 시험으로만 확인함. 다시 로그인 전 실제 자료 차단과 새 요청 허용은 미실행(제공 엔진의 새 로그인 시각 검증 계약을 확인하지 못함)` });
+  } catch {
+    results.push({ attackId: 'decider_local', expected, observed: '판정기를 불러오지 못해 확인하지 못함. 실제 자료 차단과 새 요청 허용은 미실행' });
   }
   return results;
 }

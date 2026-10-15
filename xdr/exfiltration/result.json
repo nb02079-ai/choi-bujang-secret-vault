@@ -1,0 +1,191 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "exfiltration",
+  "decisions": [
+    {
+      "alertId": "ex-01",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "large_transfer_to_unfamiliar_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-02",
+      "action": "block",
+      "confidence": 0.93,
+      "reason": "large_transfer_to_unfamiliar_destination + off_hours_large_transfer: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-03",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "repeated_large_transfer_same_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-04",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "command_channel_or_unusual_port_transfer: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-05",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "large_transfer_to_unfamiliar_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-06",
+      "action": "block",
+      "confidence": 0.93,
+      "reason": "off_hours_large_transfer + repeated_large_transfer_same_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-07",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "large_transfer_to_unfamiliar_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-08",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "bulk_copy_to_external: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-09",
+      "action": "block",
+      "confidence": 0.96,
+      "reason": "large_transfer_to_unfamiliar_destination + repeated_large_transfer_same_destination + command_channel_or_unusual_port_transfer: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-10",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "large_transfer_to_unfamiliar_destination: 평소와 다른 큰 외부 전송의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ex-11",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-12",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-13",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-14",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-15",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-16",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-17",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-18",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-19",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-20",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ex-21",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-22",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-23",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-24",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-25",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-26",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-27",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-28",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-29",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ex-30",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 평소와 다른 큰 외부 전송의 흔적이 없어 기록만 합니다."
+    }
+  ],
+  "counts": {
+    "block": 10,
+    "alert": 10,
+    "record": 10
+  }
+}

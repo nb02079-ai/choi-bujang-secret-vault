@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "basis": {
+    "technique": "T1041",
+    "name": "Exfiltration Over C2 Channel",
+    "url": "https://attack.mitre.org/techniques/T1041/",
+    "relatedTechniques": ["T1048"],
+    "checkedAt": "2026-10-15",
+    "checked": [
+      "https://attack.mitre.org/techniques/T1041/ (이미 쓰는 명령 통로로 자료를 내보냄, 탐지는 파일·자료 접근 직후의 이상한 외부 전송량과 드문 외부 목적지, 사용자 지정 포트를 본다)",
+      "https://attack.mitre.org/techniques/T1048/ (명령 통로와 다른 프로토콜·다른 위치로 내보냄, 탐지는 평소와 다른 파일 전송, 업무 시간 밖 활동, 평소보다 매우 큰 전송량, 외부 끝점으로의 파일 이동을 본다)"
+    ],
+    "notChecked": "두 페이지는 읽기 도구가 만든 요약으로 확인했고 원문 전체를 직접 읽지는 못했습니다. T1041 페이지는 앞부분 100000자까지만 읽었고 뒤 28463자는 읽지 못했습니다. T1048 요약에는 평소 쓰지 않는 포트가 나오지 않았습니다(포트는 T1041 쪽 요약에만 나옵니다). 큰 전송의 바이트 기준과 반복 횟수의 뜻은 출처에 없는 로컬 추정입니다.",
+    "note": "경보에는 목적지·전송 크기를 나타내는 구조화된 칸 가운데 data.dstip, data.bytes, data.files, data.count 가 있습니다. 값은 문자열이므로 숫자로 바꿔 읽습니다. '처음 보는 목적지', '업무 시간 밖', '압축 파일', '명령 통로' 같은 판단은 설명 문구(rule.description)에서 읽습니다. 큰 전송의 기준(thresholds.largeBytes)과 문구의 모양, 점수는 수업용 경보 묶음을 보고 정한 이 수업의 학생 기준입니다. T1030(전송 크기 제한)은 확인하지 않았고 쓰지 않았습니다."
+  },
+  "thresholds": {
+    "largeBytes": 50000000,
+    "evidence": "출처에 구체적 숫자가 없어 수업용 경보 묶음에서 공격으로 보이는 전송(7천만 바이트 이상)과 애매한 전송(1천5백만 바이트 이하)을 가르도록 정한 로컬 추정이다."
+  },
+  "patterns": [
+    {
+      "name": "large_transfer_to_unfamiliar_destination",
+      "technique": "T1041",
+      "condition": "설명에 처음 보는 목적지나 처음 보는 주소로 나갔다는 말이 있고, 전송량(data.bytes)이 큰 전송 기준 이상이다. 전송이 실패했거나 전송량이 기준 아래인 경우, 평소 목적지로 나간 경우는 맞지 않는다.",
+      "fields": [
+        "rule.description",
+        "data.bytes",
+        "data.dstip",
+        "data.srcuser"
+      ],
+      "alertOnly": false,
+      "evidence": "T1041은 외부 전송량이 평소와 어긋나는 것과 드문 외부 목적지로의 세션을 탐지 신호로 설명하고, T1048은 평소보다 매우 큰 전송량과 외부 끝점으로의 파일 이동을 설명한다.",
+      "source": "https://attack.mitre.org/techniques/T1041/"
+    },
+    {
+      "name": "off_hours_large_transfer",
+      "technique": "T1048",
+      "condition": "수업 시간 밖이나 업무 시간 밖에 자료가 외부로 전송됐고(압축 파일이면 더 뚜렷하다), 전송량이 큰 전송 기준 이상이다. 수업 시간 안의 압축 파일 생성이나 읽기는 맞지 않는다.",
+      "fields": [
+        "rule.description",
+        "data.bytes",
+        "data.dstip",
+        "data.srcuser"
+      ],
+      "alertOnly": false,
+      "evidence": "T1048의 탐지는 업무 시간 밖 활동과 평소보다 큰 전송량이 겹치는 파일 전송을 본다고 설명한다(압축 파일이라는 모양은 로컬 추정).",
+      "source": "https://attack.mitre.org/techniques/T1048/"
+    },
+    {
+      "name": "repeated_large_transfer_same_destination",
+      "technique": "T1048",
+      "condition": "같은 목적지로 대용량 전송이 여러 번 반복됐다고 설명하고, 전송량이 큰 전송 기준 이상이다. 작은 전송이 반복된 경우는 맞지 않는다.",
+      "fields": [
+        "rule.description",
+        "data.bytes",
+        "data.count",
+        "data.dstip"
+      ],
+      "alertOnly": false,
+      "evidence": "T1048의 탐지는 평소보다 매우 큰 전송량의 파일 전송을, T1041은 외부 전송량의 이상을 본다고 설명한다(같은 목적지로의 반복이라는 모양은 로컬 추정).",
+      "source": "https://attack.mitre.org/techniques/T1048/"
+    },
+    {
+      "name": "command_channel_or_unusual_port_transfer",
+      "technique": "T1041",
+      "condition": "설명에 명령 통로로 보냈거나 평소 쓰지 않던 포트로 자료가 전송됐다는 말이 있고, 전송량이 큰 전송 기준 이상이다. 명령 통로에 짧은 자료 이름만 보였거나 전송량이 작은 경우는 맞지 않는다.",
+      "fields": [
+        "rule.description",
+        "data.bytes",
+        "data.dstip"
+      ],
+      "alertOnly": false,
+      "evidence": "T1041은 공격자가 자료를 명령 통로와 같은 프로토콜에 실어 내보낸다고 설명하고, 탐지에서 사용자 지정 TCP/UDP 포트를 통한 이상한 외부 전송량을 본다.",
+      "source": "https://attack.mitre.org/techniques/T1041/"
+    },
+    {
+      "name": "bulk_copy_to_external",
+      "technique": "T1048",
+      "condition": "설명에 자료실 전체나 자료 묶음이 외부 주소로 복사됐다는 말이 있고, 전송량이 큰 전송 기준 이상이다. 내부 주소로의 읽기나 동기화는 맞지 않는다.",
+      "fields": [
+        "rule.description",
+        "data.bytes",
+        "data.files",
+        "data.dstip"
+      ],
+      "alertOnly": false,
+      "evidence": "T1048의 탐지는 외부 끝점으로의 파일 이동과 평소보다 매우 큰 전송량을 본다고 설명한다('자료실 전체'라는 문구의 모양은 로컬 추정).",
+      "source": "https://attack.mitre.org/techniques/T1048/"
+    }
+  ],
+  "notExfiltration": {
+    "condition": "내부 주소나 수업 자료 주소로의 읽기·저장·동기화, 작은 전송량의 읽기, 새로고침·세션 확인·로그아웃, 전송이 실패해 나간 자료가 없는 경우, 큰 전송 기준 아래의 처음 보는 주소 전송, 수업 시간 안의 압축 파일 생성은 자료 빼돌리기로 보지 않는다.",
+    "evidence": "출처가 말하는 유출은 평소와 다른 목적지나 시각으로 평소보다 큰 자료가 실제로 나가는 것이므로, 일상적인 내부 읽기나 나간 자료가 없는 경우는 해당하지 않는다."
+  }
+}

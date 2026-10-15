@@ -1,0 +1,155 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "known-cve",
+  "decisions": [
+    {
+      "alertId": "kc-01",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_header: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-02",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_param: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-03",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_param: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-04",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_header: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-05",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "jndi_lookup_in_param + scanner_probe_trace: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-06",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_param: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-07",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "jndi_lookup_in_header: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-08",
+      "action": "block",
+      "confidence": 0.93,
+      "reason": "jndi_lookup_in_header + jndi_lookup_in_param: 원격 주소가 이어지는 완전한 조회 구문이라 막습니다."
+    },
+    {
+      "alertId": "kc-09",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-10",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-11",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-12",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-13",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-14",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-15",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-16",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 조회 구문은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "kc-17",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-18",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-19",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-20",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-21",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-22",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-23",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "kc-24",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 조회 구문이나 점검 흔적이 없어 기록만 합니다."
+    }
+  ],
+  "counts": {
+    "block": 8,
+    "alert": 8,
+    "record": 8
+  }
+}

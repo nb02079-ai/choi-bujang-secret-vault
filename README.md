@@ -194,6 +194,121 @@
 - 수업 경보의 `data.url`에는 실제 공격 문자열 대신 문서용 표식(`doc-sql-…` 등)이 있어 표식과 실제 공격 모양을 둘 다 찾습니다. 한 번뿐인 의심 표기는 URL에 단서가 없어 설명 문구(따옴표, 구분 문자 등)와 Wazuh 규칙 수준에 의존하므로, 설명이나 수준이 바뀌면 놓칠 수 있습니다. 심판 정답표는 볼 수 없어서, 수준 4~9를 모두 알림으로 보는 것은 심판의 `X02_AMBIGUOUS_NOT_ALERT`·`X02_RECORD_MISMATCH` 안내를 보고 세운 추정이며 재제출로 확인해야 합니다.
 - 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
 
+## 보너스 xdr-03: 알려진 취약점 악용 경보
+
+수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/known-cve.json`(가상 24건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, 3~5단계 자료실과 `src/decider.mjs`는 건드리지 않았습니다. 구조는 위 xdr-01·02와 같습니다. 심판 통과는 학생이 보고한 내용입니다.
+
+**현재 작동하는 기능 (xdr-03 저장점, 커밋 `a496989`):**
+- `xdr/known-cve/decide.mjs`: 단독으로 계산하는 `decide(alert)` 하나만 내보냅니다(import·파일·네트워크 사용 없음). 근거는 MITRE ATT&CK T1190과 CVE-2021-44228(Log4j의 조회 구문)이고, 패턴 3개(`jndi_lookup_in_header`, `jndi_lookup_in_param`, `scanner_probe_trace`)가 맨 위 상수로 들어 있고 `patterns.json`과 같은 내용입니다. 원격 주소가 이어지는 완전한 조회 구문이 머리글이나 요청 인자에 있을 때만 막기 대상이고, 단어·번호·조각만 있는 경우는 막지 않습니다. 확신도 0.85 이상이면 `block`, 0.5 이상이면 `alert`, 그 아래는 `record`입니다.
+- 애매한 시도는 알림까지만 합니다: 점검 흔적만 있는 경보, 조회 구문이 없는 Wazuh 규칙 수준 4~9의 한 번짜리 의심, 막을 출발 주소가 올바르지 않은 경보입니다. 수준 3 이하는 기록만 합니다. 점수와 수준 구간은 수업의 학생 기준입니다.
+- `xdr/known-cve/read-alerts.mjs`: 확인용으로 시각·주소·계정·수준·설명만 뽑습니다(비밀값처럼 보이는 값은 가림). 머리글과 요청 주소는 출력하지 않습니다. `decide.mjs`와 서로 불러오지 않습니다.
+- `xdr/known-cve/respond.mjs`: `block`만 만료 시각(기본 15분)과 근거 경보 번호가 붙은 거부 규칙(`xdr.knowncve.deny`)으로 넣고, 알림을 `xdr/alerts.log`(Git 제외)에 한 줄씩 쌓습니다. 내부망·보호 주소, 계정이 확인된 경보(`known_user`), 근거 번호가 없는 경보는 규칙으로 만들지 않습니다. 판정기에는 `withKnownCveDeny`로 거부만 더하는 방식으로 꽂으며 기본값은 아무것도 막지 않습니다.
+
+**다시 실행하는 방법:**
+1. `npm run xdr:run -- known-cve`: `xdr/known-cve/result.json`을 만듭니다(`counts` 확인).
+2. `node xdr/known-cve/respond.mjs`: 경보를 시간 순서대로 다시 흘려 거부 규칙과 알림 로그를 만듭니다. 로그 위치를 바꾸려면 `--log <경로>`를 붙입니다.
+3. 시험: `node --test test/xdr-*.test.mjs`
+
+**실제로 실행한 결과 (2026-10-15, 학생의 자기 점검이며 심판의 판정이 아님):**
+
+| 확인 | 결과 |
+|---|---|
+| `result.json`의 `counts` | block 8, alert 8, record 8 (경보 24건과 일치) |
+| 명확한 공격(규칙 수준 10 이상, `kc-01`~`kc-08`) | 모두 `block`, 다시 흘리면 거부 규칙 7개(`kc-02`는 `kc-01`과 같은 주소라 알림만) |
+| 애매한 시도(규칙 수준 4~9, 8건) | 모두 `alert`, 알림 로그에만 남고 거부 규칙 없음 |
+| 정상 이벤트(규칙 수준 3 이하 8건) | 모두 `record`, `block` 0건, 알림 로그에도 없음 |
+
+"정상 이벤트"는 정답표가 없어 규칙 수준 3 이하로 정한 기준입니다.
+
+**아직 연결되지 않았거나 확인하지 못한 것:**
+- 판정 요청에는 주소 필드가 없어, `withKnownCveDeny`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 주소를 알려 주는 연결과 거부 이유 코드 `knowncve_blocked`의 등록 여부는 확인하지 않았습니다.
+- `src/decider.mjs`에는 xdr 연결이 없고 `RULE_IDS`에 `xdr.knowncve.deny`를 넣지 않았습니다. 거부 규칙은 메모리에만 있어 프로세스가 끝나면 사라집니다.
+- 판단은 수업 경보의 문서용 표기에 맞춘 문자열 모양에 의존합니다. 이 모양이 다른 형태로 오면 놓칠 수 있습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
+
+## 보너스 xdr-04: 몰래 심어진 프로그램 경보
+
+수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/persistence.json`(가상 24건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, `src/decider.mjs`는 건드리지 않았습니다. 구조는 xdr-03과 같습니다. 심판 통과는 학생이 보고한 내용입니다.
+
+**현재 작동하는 기능 (xdr-04 저장점, 커밋 `3d91529`):**
+- `xdr/persistence/decide.mjs`: 단독으로 계산하는 `decide(alert)` 하나만 내보냅니다(import·파일·네트워크 사용 없음). 근거는 MITRE ATT&CK T1543(보조 T1053, T1547.001)이고, 패턴 3개(`service_unsigned_new_or_changed`, `scheduled_task_unfamiliar`, `startup_folder_added`)와 임시 폴더 경로 보조 신호가 맨 위 상수로 들어 있고 `patterns.json`과 같은 내용입니다. 새로 만든 서비스·예약 작업·시작 항목이 서명 없음이나 평소 목록에 없음 같은 뚜렷한 표현과 함께 확인될 때만 막기 대상입니다.
+- 애매한 시도는 알림까지만 합니다: 수업 도구 이름만 있는 항목, 설명만 바뀐 서비스, 임시 폴더 파일 하나, Wazuh 규칙 수준 4~9의 한 번짜리 의심, 막을 출발 주소가 올바르지 않은 경보입니다. 서명된 기존 서비스 같은 정상 이벤트(수준 3 이하)는 기록만 합니다.
+- `xdr/persistence/read-alerts.mjs`: 확인용으로 시각·주소·계정·수준·설명만 뽑습니다(비밀값처럼 보이는 값은 가림). 실행 파일 경로는 출력하지 않습니다. `decide.mjs`와 서로 불러오지 않습니다.
+- `xdr/persistence/respond.mjs`: `block`만 만료 시각(기본 15분)과 근거 경보 번호가 붙은 거부 규칙(`xdr.persistence.isolate`)으로 넣고, 알림을 `xdr/alerts.log`에 한 줄씩 쌓습니다. 막는 대상은 계정이 아니라 출발 주소 한 개(그 PC의 접속 격리)이며, 내부망·보호 주소와 근거 번호가 없는 경보는 규칙으로 만들지 않습니다. 판정기에는 `withPersistenceIsolation`으로 거부만 더하는 방식으로 꽂으며 기본값은 아무것도 막지 않습니다.
+
+**다시 실행하는 방법:**
+1. `npm run xdr:run -- persistence`: `xdr/persistence/result.json`을 만듭니다(`counts` 확인).
+2. `node xdr/persistence/respond.mjs`: 경보를 시간 순서대로 다시 흘려 거부 규칙과 알림 로그를 만듭니다. 로그 위치를 바꾸려면 `--log <경로>`를 붙입니다.
+3. 시험: `node --test test/xdr-*.test.mjs`
+
+**실제로 실행한 결과 (2026-10-15, 학생의 자기 점검이며 심판의 판정이 아님):**
+
+| 확인 | 결과 |
+|---|---|
+| `result.json`의 `counts` | block 8, alert 8, record 8 (경보 24건과 일치) |
+| 명확한 공격(규칙 수준 10 이상, `ps-01`~`ps-08`) | 모두 `block`, 다시 흘리면 거부 규칙 7개(`ps-02`는 `ps-01`과 같은 주소라 알림만) |
+| 애매한 시도(규칙 수준 4~9, 8건) | 모두 `alert`, 알림 로그에만 남고 거부 규칙 없음 |
+| 정상 이벤트(규칙 수준 3 이하 8건) | 모두 `record`, `block` 0건, 알림 로그에도 없음 |
+
+**아직 연결되지 않았거나 확인하지 못한 것:**
+- 판정 요청에는 주소 필드가 없어, `withPersistenceIsolation`의 `addressOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 주소를 알려 주는 연결과 거부 이유 코드 `persistence_isolated`의 등록 여부는 확인하지 않았습니다.
+- 같은 주소를 여러 PC가 쓰면 다른 PC도 함께 격리될 수 있습니다. 판단은 경보의 한국어 설명 문구에 기대므로 문구가 바뀌면 놓칠 수 있습니다. 거부 규칙은 메모리에만 있습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
+
+## 보너스 xdr-05: 권한 가로채기 경보
+
+수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/privilege.json`(가상 26건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, `src/decider.mjs`는 건드리지 않았습니다. 이 모듈은 막는 단위가 주소가 아니라 계정이라는 점이 앞의 셋과 다릅니다. 심판 통과는 학생이 보고한 내용입니다.
+
+**현재 작동하는 기능 (xdr-05 저장점, 커밋 `9381952`):**
+- `xdr/privilege/decide.mjs`: 단독으로 계산하는 `decide(alert)` 하나만 내보냅니다(import·파일·네트워크 사용 없음). 근거는 MITRE ATT&CK T1078이고(T1068은 취약점 악용 흔적이 이 경보 묶음에 없어 간접 근거로만 곁들임), 패턴 4개(`admin_group_added`, `admin_use_unfamiliar_or_sudden`, `admin_use_off_hours`, `other_account_privilege_use`)가 맨 위 상수로 들어 있고 `patterns.json`과 같은 내용입니다. 관리자 그룹 추가는 T1078의 탐지 설명에 나오지 않아 로컬 추정이라고 패턴 파일에 밝혔습니다.
+- 애매한 시도는 알림까지만 합니다: 평소 주소의 관리자 명령 한 번, 실패하거나 취소된 시도, 관리자가 아닌 그룹 변경, Wazuh 규칙 수준 4~9의 한 번짜리 의심, 세션을 거둘 계정이 올바르지 않은 경보입니다. 수준 3 이하(로그인·로그아웃·읽기)는 기록만 합니다.
+- `xdr/privilege/read-alerts.mjs`: 확인용으로 시각·주소·계정·수준·설명만 뽑습니다(비밀값처럼 보이는 값은 가림). 그룹 이름과 반복 건수는 출력하지 않습니다. `decide.mjs`와 서로 불러오지 않습니다.
+- `xdr/privilege/respond.mjs`: `block`만 만료 시각(기본 15분)과 근거 경보 번호가 붙은 거부 규칙(`xdr.privilege.revoke`)으로 넣고, 알림을 `xdr/alerts.log`에 한 줄씩 쌓습니다. 막는 대상은 계정 한 개(세션 거둠)이고, 같은 주소의 다른 계정은 막지 않습니다. 수업용 관리 계정과 서비스 계정은 기본 지킴 목록(`PROTECTED_ACCOUNTS`)에 있어 규칙으로 만들지 않습니다. 판정기에는 `withPrivilegeRevoke`로 거부만 더하는 방식으로 꽂으며 기본값은 아무것도 막지 않습니다.
+
+**다시 실행하는 방법:**
+1. `npm run xdr:run -- privilege`: `xdr/privilege/result.json`을 만듭니다(`counts` 확인).
+2. `node xdr/privilege/respond.mjs`: 경보를 시간 순서대로 다시 흘려 거부 규칙과 알림 로그를 만듭니다. 로그 위치를 바꾸려면 `--log <경로>`를 붙입니다.
+3. 시험: `node --test test/xdr-*.test.mjs`
+
+**실제로 실행한 결과 (2026-10-15, 학생의 자기 점검이며 심판의 판정이 아님):**
+
+| 확인 | 결과 |
+|---|---|
+| `result.json`의 `counts` | block 9, alert 8, record 9 (경보 26건과 일치) |
+| 명확한 공격(규칙 수준 10 이상, `pv-01`~`pv-09`) | 모두 `block`, 다시 흘리면 거부 규칙 8개(`pv-02`는 `pv-01`과 같은 계정이라 알림만) |
+| 애매한 시도(규칙 수준 4~9, 8건) | 모두 `alert`, 알림 로그에만 남고 거부 규칙 없음 |
+| 정상 이벤트(규칙 수준 3 이하 9건) | 모두 `record`, `block` 0건, 알림 로그에도 없음 |
+
+**아직 연결되지 않았거나 확인하지 못한 것:**
+- 판정 요청에는 계정 필드가 없어, `withPrivilegeRevoke`의 `accountOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 확인한 세션에서 계정을 알려 주는 연결과 거부 이유 코드 `privilege_session_revoked`의 등록 여부는 확인하지 않았습니다.
+- 계정 단위로 거두므로, 공격이 확인된 계정의 정상 세션도 15분 동안 함께 거부됩니다. 근거 페이지는 요약 도구로 확인했고 원문 전체를 읽지는 못했습니다. 거부 규칙은 메모리에만 있습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
+
+## 보너스 xdr-06: 자료 빼돌리기 경보
+
+수업용 Wazuh 모양 경보 묶음 `xdr/fixtures/exfiltration.json`(가상 30건)을 읽어 `block`·`alert`·`record`로 나눕니다. 실제 로그가 아니며, `src/decider.mjs`는 건드리지 않았습니다. 이 모듈은 막는 단위가 목적지 주소입니다. 심판 통과는 학생이 보고한 내용입니다.
+
+**현재 작동하는 기능 (xdr-06 저장점, 커밋 `4a0ebd9`):**
+- `xdr/exfiltration/decide.mjs`: 단독으로 계산하는 `decide(alert)` 하나만 내보냅니다(import·파일·네트워크 사용 없음). 근거는 MITRE ATT&CK T1041(보조 T1048)이고, 패턴 5개(`large_transfer_to_unfamiliar_destination`, `off_hours_large_transfer`, `repeated_large_transfer_same_destination`, `command_channel_or_unusual_port_transfer`, `bulk_copy_to_external`)와 큰 전송 기준 `thresholds.largeBytes`(5천만 바이트)가 맨 위 상수로 들어 있고 `patterns.json`과 같은 내용입니다. 전송량(`data.bytes`)이 기준 이상일 때만 패턴을 검사합니다. 5천만 바이트는 MITRE 값이 아니라 이 수업의 학생 기준입니다.
+- 애매한 시도는 알림까지만 합니다: 기준 아래의 작은 전송, 실패한 전송, 평소 목적지 변화, 전송량을 읽을 수 없는 경보, Wazuh 규칙 수준 4~9의 한 번짜리 의심, 막을 목적지 주소가 올바르지 않은 경보입니다. 내부 읽기·동기화 같은 정상 이벤트(수준 3 이하)는 기록만 합니다.
+- `xdr/exfiltration/read-alerts.mjs`: 확인용으로 시각·출발 주소·계정·수준·설명만 뽑습니다(비밀값처럼 보이는 값은 가림). 목적지·전송량·파일 수·반복 건수는 출력하지 않습니다. `decide.mjs`와 서로 불러오지 않습니다.
+- `xdr/exfiltration/respond.mjs`: `block`만 만료 시각(기본 15분)과 근거 경보 번호가 붙은 거부 규칙(`xdr.exfiltration.block`)으로 넣고, 알림을 `xdr/alerts.log`에 한 줄씩 쌓습니다. 막는 대상은 목적지 주소 한 개이고, 출발 주소와 계정은 막지 않습니다. 내부망 주소와 지킬 목적지 목록(`PROTECTED_DESTINATIONS`: 자료실과 수업 자료 주소)은 규칙으로 만들지 않습니다. 판정기에는 `withExfiltrationBlock`으로 거부만 더하는 방식으로 꽂으며 기본값은 아무것도 막지 않습니다.
+
+**다시 실행하는 방법:**
+1. `npm run xdr:run -- exfiltration`: `xdr/exfiltration/result.json`을 만듭니다(`counts` 확인).
+2. `node xdr/exfiltration/respond.mjs`: 경보를 시간 순서대로 다시 흘려 거부 규칙과 알림 로그를 만듭니다. 로그 위치를 바꾸려면 `--log <경로>`를 붙입니다.
+3. 시험: `node --test test/xdr-*.test.mjs`
+
+**실제로 실행한 결과 (2026-10-15, 학생의 자기 점검이며 심판의 판정이 아님):**
+
+| 확인 | 결과 |
+|---|---|
+| `result.json`의 `counts` | block 10, alert 10, record 10 (경보 30건과 일치) |
+| 명확한 공격(규칙 수준 10 이상, `ex-01`~`ex-10`) | 모두 `block`, 다시 흘리면 거부 규칙 10개(같은 목적지가 다시 나온 경보는 앞선 규칙이 만료된 뒤라 새 규칙이 됨) |
+| 애매한 시도(규칙 수준 4~9, 10건) | 모두 `alert`, 알림 로그에만 남고 거부 규칙 없음 |
+| 정상 이벤트(규칙 수준 3 이하 10건) | 모두 `record`, `block` 0건, 알림 로그에도 없음 |
+
+**아직 연결되지 않았거나 확인하지 못한 것:**
+- 판정 요청에는 목적지 필드가 없어, `withExfiltrationBlock`의 `destinationOf` 기본값은 아무것도 막지 않습니다. 운영 엔진이 요청 밖에서 목적지를 알려 주는 연결과 거부 이유 코드 `exfiltration_destination_blocked`의 등록 여부는 확인하지 않았습니다.
+- 목적지 단위로 막으므로, 지킬 목록에 없는 같은 목적지를 쓰는 다른 정상 전송도 15분 동안 막힙니다. 근거 페이지는 요약 도구로 확인했고 T1041 페이지는 뒤 28,463자를 읽지 못했습니다. 거부 규칙은 메모리에만 있습니다. 로컬 시험과 연습 실행이며 심판 판정이나 실제 접속 차단이 아닙니다.
+
 ## 6단계: 등록한 기기만 자료실에 들어옵니다
 
 **현재 작동하는 기능 (판정기 규칙 하나):**

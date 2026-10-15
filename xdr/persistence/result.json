@@ -1,0 +1,155 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "persistence",
+  "decisions": [
+    {
+      "alertId": "ps-01",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "service_unsigned_new_or_changed + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-02",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "scheduled_task_unfamiliar + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-03",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "startup_folder_added: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-04",
+      "action": "block",
+      "confidence": 0.88,
+      "reason": "service_unsigned_new_or_changed: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-05",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "scheduled_task_unfamiliar + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-06",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "service_unsigned_new_or_changed + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-07",
+      "action": "block",
+      "confidence": 0.96,
+      "reason": "scheduled_task_unfamiliar + startup_folder_added + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-08",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "service_unsigned_new_or_changed + temp_folder_path: 새로 심은 프로그램의 뚜렷한 표현이 있어 막습니다."
+    },
+    {
+      "alertId": "ps-09",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-10",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-11",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-12",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-13",
+      "action": "alert",
+      "confidence": 0.55,
+      "reason": "temp_folder_path: 임시 폴더 실행 파일만 있고 등록은 확인되지 않아 알림만 합니다."
+    },
+    {
+      "alertId": "ps-14",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-15",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-16",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "single_suspicious_event: 뚜렷한 패턴은 없지만 한 번짜리 의심 이벤트(수준 4~9)라 알림만 합니다."
+    },
+    {
+      "alertId": "ps-17",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-18",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-19",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-20",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-21",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-22",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-23",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    },
+    {
+      "alertId": "ps-24",
+      "action": "record",
+      "confidence": 0,
+      "reason": "맞는 패턴 없음: 새로 심은 흔적이 없어 기록만 합니다."
+    }
+  ],
+  "counts": {
+    "block": 8,
+    "alert": 8,
+    "record": 8
+  }
+}
